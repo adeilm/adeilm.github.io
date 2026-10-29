@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Why AI document search gets tables wrong, and how to fix it · Dali Abid</title>
+<meta name="description" content="AI assistants that read PDFs often cut tables apart and lose the headers. The fix: one piece per row, with its headers, plus two kinds of search." />
+<meta name="author" content="Dali Abid" />
+<meta property="og:title" content="Why AI document search gets tables wrong, and how to fix it" />
+<meta property="og:description" content="AI assistants that read PDFs often cut tables apart and lose the headers. The fix: one piece per row, with its headers, plus two kinds of search." />
+<meta property="og:type" content="article" />
+<meta property="og:image" content="https://adeilm.github.io/blog/tables-in-rag-docling-pgvector/cover.webp" />
+<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/blog/post.css" />
+<script>
+  // same day/night choice as the portfolio (night by default)
+  try { if (localStorage.getItem('theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}
+</script>
+<script data-goatcounter="https://daliabid.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+</head>
+<body>
+<header class="post-top">
+  <a class="post-home" href="/#blog"><img src="/logo.svg" alt="" width="26" height="26" /> Dali <span>Abid</span></a>
+  <a class="post-back" href="/#blog">← All posts</a>
+</header>
+
+<article class="post">
+  <p class="post-meta">RAG · Documents · 2026-10-29 · 6 min read</p>
+  <h1>Why AI document search gets tables wrong, and how to fix it</h1>
+  <img class="post-cover" src="cover.webp" alt="" />
+  <p>Many companies now have an AI assistant that answers questions from their documents. &quot;How many API calls does the Business plan include?&quot; The assistant finds the right passage in a PDF, then writes an answer from it.</p>
+<p>This works well for normal text. It often fails on tables, and tables are where many answers live: a limit, a price, a dose, a date.</p>
+<p>I ran into this while building a question-answering system for long PDFs at a clinical-trial software company. Our pipeline used Docling to keep complex tables intact, retrieve single rows linked to their parent table, and cite the pages and sections behind each answer. This post explains the general technique, with public docs and a made-up table.</p>
+<div class="post-tldr">
+<p class="post-tldr__title">The post in 30 seconds</p>
+<dl class="post-brief">
+<dt>Problem</dt><dd>AI search tools cut documents into small pieces. A table cut in the wrong place loses its headers, so the numbers lose their meaning.</dd>
+<dt>Fix</dt><dd>Read the PDF's layout (with Docling), store each table row together with its headers, and link it to the full table.</dd>
+<dt>Search</dt><dd>Combine two searches, by meaning and by exact words, in one PostgreSQL database.</dd>
+<dt>Citations</dt><dd>Every answer cites its page and section, taken from stored data.</dd>
+</dl>
+</div>
+
+<div class="post-terms">
+<p class="post-terms__title">Words you'll see</p>
+<dl>
+<div><dt>RAG</dt><dd>Retrieval-augmented generation: the AI first finds passages in your documents, then answers from them.</dd></div>
+<div><dt>Chunk</dt><dd>A small piece of a document. RAG systems search pieces, not whole files.</dd></div>
+<div><dt>Embedding</dt><dd>A list of numbers that captures what a text means, so similar meanings can be found.</dd></div>
+<div><dt>Docling</dt><dd>A free tool that reads PDFs and understands their layout, including tables.</dd></div>
+<div><dt>pgvector</dt><dd>An add-on that lets the PostgreSQL database search by meaning, using embeddings.</dd></div>
+</dl>
+</div>
+
+<h2>How an AI assistant reads your documents</h2>
+<div class="post-flow" role="list" aria-label="How a RAG system answers from a document">
+<div class="post-flow__step" role="listitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z M15 2v5h5"/></svg><b>Document</b><span>A long PDF with text and tables.</span></div>
+<div class="post-flow__arrow" aria-hidden="true">cut into</div>
+<div class="post-flow__step" role="listitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 7.5l9 4.5 9-4.5z M3 12l9 4.5 9-4.5 M3 16.5l9 4.5 9-4.5"/></svg><b>Chunks</b><span>Small pieces, each stored with an embedding.</span></div>
+<div class="post-flow__arrow" aria-hidden="true">question</div>
+<div class="post-flow__step" role="listitem"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-5-5"/></svg><b>Search</b><span>Finds the pieces closest to the question.</span></div>
+<div class="post-flow__arrow" aria-hidden="true">reads</div>
+<div class="post-flow__step post-flow__step--ai" role="listitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.6 5 2 6.4 7 7-5 .6-6.4 2-7 7-.6-5-2-6.4-7-7 5-.6 6.4-2 7-7z M19 15c.3 2 1 2.7 3 3-2 .3-2.7 1-3 3-.3-2-1-2.7-3-3 2-.3 2.7-1 3-3z"/></svg><b>AI answer</b><span>Written from those pieces, with citations.</span></div>
+</div>
+
+<p>The weak point is the first arrow: <strong>where you cut</strong>. Most tutorials treat a PDF as one long string and cut it every N characters. That is fine for prose. It breaks tables.</p>
+<h2>Why cutting breaks tables</h2>
+<p><figure class="post-figure"><img src="cut.webp" alt="A long scroll with a table is cut by giant scissors, and the header row floats away while the boy tries to catch it" loading="lazy" /><figcaption>Cut a table in the wrong place, and the numbers lose their headers.</figcaption></figure></p>
+<p>Take this small table from page 12 of an imaginary product handbook, in section &quot;4.1 Usage limits&quot;:</p>
+<table>
+<thead>
+<tr>
+<th>Plan</th>
+<th>Storage</th>
+<th>API calls / month</th>
+<th>Support</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Free</td>
+<td>5 GB</td>
+<td>1,000</td>
+<td>Community</td>
+</tr>
+<tr>
+<td>Team</td>
+<td>100 GB</td>
+<td>50,000</td>
+<td>Email</td>
+</tr>
+<tr>
+<td>Business</td>
+<td>1 TB</td>
+<td>500,000</td>
+<td>Priority</td>
+</tr>
+</tbody></table>
+<p>A basic pipeline turns the grid into a stream of words and cuts it every N characters. The title and headers can land in one chunk, and the Business row in the next, mixed with the following section.</p>
+<p><figure class="post-figure post-svg"><svg class="dd-cut" viewBox="0 0 360 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dd-cut-title dd-cut-desc">
+  <title id="dd-cut-title">Fixed-size chunks vs. row chunks</title>
+  <desc id="dd-cut-desc">The Plan limits table cut by fixed-size chunking: chunk 41 holds the title, the column headers, the Free row and half of the Team row, while chunk 42 holds the rest of the Team row, the Business row with 500,000 API calls and the next section. With row chunks, each of the Free, Team and Business rows is its own chunk that repeats the table title, section, page and column headers.</desc>
+  <style>
+    svg.dd-cut { max-width: 432px; margin-inline: auto; }
+    .dd-cut .dd-eb { font: 600 11.5px 'Space Grotesk', system-ui, sans-serif; letter-spacing: .1em; fill: var(--dim); }
+    .dd-cut .dd-c41, .dd-cut .dd-c42 { fill: var(--dim); stroke: var(--dim); stroke-opacity: .35; stroke-width: 1; }
+    .dd-cut .dd-c41 { fill-opacity: .16; }
+    .dd-cut .dd-c42 { fill-opacity: .05; }
+    .dd-cut .dd-cutline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+    .dd-cut .dd-grid { fill: none; stroke: var(--dim); stroke-opacity: .35; stroke-width: 1; }
+    .dd-cut .dd-card { fill: var(--surface); stroke: var(--dim); stroke-opacity: .45; stroke-width: 1; }
+    .dd-cut .dd-th { font: 600 12px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-cut .dd-td { font: 400 12px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-cut .dd-note { font: 400 12px 'Inter', system-ui, sans-serif; fill: var(--dim); }
+    .dd-cut .dd-tag { font: 600 11.5px 'Space Grotesk', system-ui, sans-serif; letter-spacing: .08em; fill: var(--dim); }
+    .dd-cut .dd-hit { fill: none; stroke: var(--accent); stroke-width: 1.25; }
+    .dd-cut .dd-hit-t { font: 600 12px 'Inter', system-ui, sans-serif; fill: var(--link); }
+  </style>
+
+  <!-- columns: Plan 12-80 | Storage 80-144 | API calls / month 144-264 | Support 264-348 -->
+
+  <!-- BEFORE: one table, two fixed-size chunks -->
+  <text class="dd-eb" x="12" y="16">BEFORE · FIXED-SIZE CHUNKS</text>
+
+  <path class="dd-c41" d="M12,28 H348 V108 H144 V136 H12 Z"/>
+  <path class="dd-c42" d="M144,108 H348 V188 H12 V136 H144 Z"/>
+
+  <rect class="dd-grid" x="12" y="52" width="336" height="112"/>
+  <path class="dd-grid" d="M12,80 H348 M12,108 H348 M12,136 H348 M80,52 V164 M144,52 V164 M264,52 V164"/>
+
+  <text class="dd-th" x="20" y="44">Table 2: Plan limits</text>
+  <text class="dd-tag" x="340" y="44" text-anchor="end">CHUNK 41</text>
+
+  <text class="dd-th" x="20" y="70">Plan</text>
+  <text class="dd-th" x="88" y="70">Storage</text>
+  <text class="dd-th" x="152" y="70">API calls / month</text>
+  <text class="dd-th" x="272" y="70">Support</text>
+
+  <text class="dd-td" x="20" y="98">Free</text>
+  <text class="dd-td" x="88" y="98">5 GB</text>
+  <text class="dd-td" x="152" y="98">1,000</text>
+  <text class="dd-td" x="272" y="98">Community</text>
+
+  <text class="dd-td" x="20" y="126">Team</text>
+  <text class="dd-td" x="88" y="126">100 GB</text>
+  <text class="dd-td" x="152" y="126">50,000</text>
+  <text class="dd-td" x="272" y="126">Email</text>
+
+  <text class="dd-td" x="20" y="154">Business</text>
+  <text class="dd-td" x="88" y="154">1 TB</text>
+  <rect class="dd-hit" x="148" y="140" width="112" height="20" rx="3"/>
+  <text class="dd-hit-t" x="152" y="154">500,000</text>
+  <text class="dd-td" x="272" y="154">Priority</text>
+
+  <text class="dd-note" x="20" y="180">4.2 Rate limiting …</text>
+  <text class="dd-tag" x="340" y="180" text-anchor="end">CHUNK 42</text>
+
+  <!-- the chunk boundary, drawn last so it reads on top of the grid -->
+  <path class="dd-cutline" d="M12,136 H144 V108 H348"/>
+
+  <!-- AFTER: one chunk per row, each carrying title, section, page and headers -->
+  <text class="dd-eb" x="12" y="220">AFTER · ROW CHUNKS</text>
+
+  <rect class="dd-card" x="12" y="232" width="336" height="76" rx="6"/>
+  <text x="20" y="249"><tspan class="dd-th">Table 2: Plan limits</tspan><tspan class="dd-note"> | 4.1 Usage limits (p. 12)</tspan></text>
+  <path class="dd-grid" d="M12,256 H348 M12,282 H348 M80,256 V308 M144,256 V308 M264,256 V308"/>
+  <text class="dd-th" x="20" y="273">Plan</text><text class="dd-th" x="88" y="273">Storage</text><text class="dd-th" x="152" y="273">API calls / month</text><text class="dd-th" x="272" y="273">Support</text>
+  <text class="dd-td" x="20" y="299">Free</text><text class="dd-td" x="88" y="299">5 GB</text><text class="dd-td" x="152" y="299">1,000</text><text class="dd-td" x="272" y="299">Community</text>
+
+  <rect class="dd-card" x="12" y="316" width="336" height="76" rx="6"/>
+  <text x="20" y="333"><tspan class="dd-th">Table 2: Plan limits</tspan><tspan class="dd-note"> | 4.1 Usage limits (p. 12)</tspan></text>
+  <path class="dd-grid" d="M12,340 H348 M12,366 H348 M80,340 V392 M144,340 V392 M264,340 V392"/>
+  <text class="dd-th" x="20" y="357">Plan</text><text class="dd-th" x="88" y="357">Storage</text><text class="dd-th" x="152" y="357">API calls / month</text><text class="dd-th" x="272" y="357">Support</text>
+  <text class="dd-td" x="20" y="383">Team</text><text class="dd-td" x="88" y="383">100 GB</text><text class="dd-td" x="152" y="383">50,000</text><text class="dd-td" x="272" y="383">Email</text>
+
+  <rect class="dd-card" x="12" y="400" width="336" height="76" rx="6"/>
+  <text x="20" y="417"><tspan class="dd-th">Table 2: Plan limits</tspan><tspan class="dd-note"> | 4.1 Usage limits (p. 12)</tspan></text>
+  <path class="dd-grid" d="M12,424 H348 M12,450 H348 M80,424 V476 M144,424 V476 M264,424 V476"/>
+  <text class="dd-th" x="20" y="441">Plan</text><text class="dd-th" x="88" y="441">Storage</text><text class="dd-th" x="152" y="441">API calls / month</text><text class="dd-th" x="272" y="441">Support</text>
+  <text class="dd-td" x="20" y="467">Business</text><text class="dd-td" x="88" y="467">1 TB</text>
+  <rect class="dd-hit" x="148" y="453" width="112" height="20" rx="3"/>
+  <text class="dd-hit-t" x="152" y="467">500,000</text>
+  <text class="dd-td" x="272" y="467">Priority</text>
+</svg>
+<figcaption>Where the cut falls in the table, and the fix: one chunk per row, each repeating the title and headers.</figcaption></figure></p>
+<p>Now ask: &quot;How many API calls per month does the Business plan include?&quot; The chunk with &quot;500,000&quot; has no title and no column headers. The Team row&#39;s &quot;50,000&quot; sits right before &quot;Business&quot;. The AI has to guess which number belongs to which column.</p>
+<p>Anthropic describes the same problem for <a href="https://www.anthropic.com/news/contextual-retrieval" target="_blank" rel="noopener noreferrer">contextual retrieval</a>: &quot;revenue grew by 3%&quot; is useless once the chunk no longer says which company or period. In a table, every cell depends on its row and column headers, so the damage is worse.</p>
+<h2>The fix: a piece that answers by itself</h2>
+<p>Store each row with everything it needs to make sense:</p>
+<div class="post-compare">
+<div class="post-compare__col">
+<p class="post-compare__label">A bare row</p>
+<pre class="post-compare__raw">Business  1 TB  500,000  Priority</pre>
+<p>Which number is the API limit? The AI must guess.</p>
+</div>
+<div class="post-compare__col post-compare__col--ai">
+<p class="post-compare__label">A row chunk</p>
+<pre class="post-compare__raw">Table 2: Plan limits
+Section 4.1, page 12
+Plan: Business
+Storage: 1 TB
+API calls / month: 500,000
+Support: Priority</pre>
+<p>Every number has its header, and the chunk says where it came from.</p>
+</div>
+</div>
+
+<p><figure class="post-figure"><img src="rows.webp" alt="Inside a tent, the boy sorts parchment cards that each have a glowing golden header strip, helped by a small golden star" loading="lazy" /><figcaption>Each row travels with its own headers.</figcaption></figure></p>
+<p>Here is the full pipeline. Each step is explained in plain words below it:</p>
+<p><figure class="post-figure post-svg"><svg class="dd-rag" viewBox="0 0 360 468" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dd-rag-title dd-rag-desc">
+  <title id="dd-rag-title">Table-safe RAG pipeline</title>
+  <desc id="dd-rag-desc">A long PDF is parsed by Docling for layout and table structure, split into text chunks and row chunks that carry the table title and column headers and link to their parent table, stored in PostgreSQL with pgvector and full-text search, retrieved with hybrid vector and keyword search fused by Reciprocal Rank Fusion, and turned into an answer with page and section citations.</desc>
+  <style>
+    svg.dd-rag { max-width: 432px; margin-inline: auto; }
+    .dd-rag .dd-mask { fill: var(--bg); }
+    .dd-rag .dd-node { fill: var(--surface); stroke: var(--dim); stroke-opacity: .45; stroke-width: 1; }
+    .dd-rag .dd-node--focal { fill: var(--accent); fill-opacity: .12; stroke: var(--accent); stroke-opacity: 1; stroke-width: 1.25; }
+    .dd-rag .dd-node--input { fill: var(--bg); stroke: var(--dim); stroke-opacity: .7; }
+    .dd-rag .dd-name { font: 600 14.5px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-rag .dd-sub { font: 400 12px 'Inter', system-ui, sans-serif; fill: var(--dim); }
+    .dd-rag .dd-num { font: 400 12px 'JetBrains Mono', ui-monospace, monospace; fill: var(--dim); }
+    .dd-rag .dd-glyph { fill: none; stroke: var(--dim); stroke-width: 1.1; stroke-linejoin: round; }
+    .dd-rag .dd-wire { fill: none; stroke: var(--dim); stroke-width: 1.25; }
+    .dd-rag .dd-head { fill: var(--dim); }
+  </style>
+  <defs>
+    <marker id="dd-rag-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon class="dd-head" points="0 0, 8 3, 0 6"/>
+    </marker>
+  </defs>
+
+  <!-- Connectors (behind nodes) -->
+  <line class="dd-wire" x1="192" y1="48" x2="192" y2="72" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="94" y1="124" x2="94" y2="156" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="264" y1="124" x2="264" y2="156" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="94" y1="224" x2="94" y2="256" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="264" y1="224" x2="264" y2="256" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="192" y1="308" x2="192" y2="332" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="192" y1="384" x2="192" y2="408" marker-end="url(#dd-rag-arrow)"/>
+
+  <!-- Input -->
+  <rect class="dd-node dd-node--input" x="32" y="8" width="320" height="40" rx="6"/>
+  <text class="dd-name" x="48" y="33">Long PDF</text>
+  <path class="dd-glyph" d="M318,17 h11 l7,7 v15 h-18 z M329,17 v7 h7"/>
+
+  <!-- Step 1: parse -->
+  <text class="dd-num" x="14" y="94" text-anchor="middle">1</text>
+  <rect class="dd-node" x="32" y="72" width="320" height="52" rx="6"/>
+  <text class="dd-name" x="48" y="94">Docling</text>
+  <text class="dd-sub" x="48" y="112">layout + table structure</text>
+
+  <!-- Step 2: chunk -->
+  <text class="dd-num" x="14" y="178" text-anchor="middle">2</text>
+  <rect class="dd-node" x="32" y="156" width="124" height="68" rx="6"/>
+  <text class="dd-name" x="48" y="178">Text chunks</text>
+  <text class="dd-sub" x="48" y="196">prose + headings</text>
+  <rect class="dd-mask" x="176" y="156" width="176" height="68" rx="6"/>
+  <rect class="dd-node dd-node--focal" x="176" y="156" width="176" height="68" rx="6"/>
+  <text class="dd-name" x="192" y="178">Row chunks</text>
+  <text class="dd-sub" x="192" y="196">with title + headers</text>
+  <text class="dd-sub" x="192" y="212">linked to parent table</text>
+
+  <!-- Step 3: store -->
+  <text class="dd-num" x="14" y="278" text-anchor="middle">3</text>
+  <rect class="dd-node" x="32" y="256" width="320" height="52" rx="6"/>
+  <text class="dd-name" x="48" y="278">PostgreSQL</text>
+  <text class="dd-sub" x="48" y="296">pgvector + full-text</text>
+  <path class="dd-glyph" d="M318,275 v14 a9,3.5 0 0 0 18,0 v-14 M318,275 a9,3.5 0 0 0 18,0 a9,3.5 0 0 0 -18,0"/>
+
+  <!-- Step 4: retrieve -->
+  <text class="dd-num" x="14" y="354" text-anchor="middle">4</text>
+  <rect class="dd-node" x="32" y="332" width="320" height="52" rx="6"/>
+  <text class="dd-name" x="48" y="354">Hybrid search</text>
+  <text class="dd-sub" x="48" y="372">vector + keyword, fused with RRF</text>
+
+  <!-- Step 5: answer -->
+  <text class="dd-num" x="14" y="430" text-anchor="middle">5</text>
+  <rect class="dd-node" x="32" y="408" width="320" height="52" rx="6"/>
+  <text class="dd-name" x="48" y="430">Answer</text>
+  <text class="dd-sub" x="48" y="448">with page and section citations</text>
+</svg>
+<figcaption>From PDF to a cited answer.</figcaption></figure></p>
+<ol>
+<li><strong>Read the layout.</strong> Docling sees which parts of the page are text, headings and tables, so a table stays a table.</li>
+<li><strong>Cut tables smartly.</strong> A small table becomes one chunk. A large table becomes one chunk per row, each with the title and headers. Every row also keeps a link to its full table.</li>
+<li><strong>Store everything in one place</strong>: a PostgreSQL table, with pgvector for search by meaning.</li>
+<li><strong>Search two ways and merge</strong> (next section).</li>
+<li><strong>Cite the page.</strong> Each chunk stores its page and section, so citations come from data, not from the AI&#39;s text.</li>
+</ol>
+<h2>Two searches are better than one</h2>
+<p><figure class="post-figure"><img src="search.webp" alt="The boy shines a magnifying glass and a golden star helper shines a compass; their two beams meet on one glowing card among hundreds" loading="lazy" /><figcaption>Two searches meet on the best result.</figcaption></figure></p>
+<p><strong>Search by meaning</strong> (embeddings) finds rows that say the same thing in other words. <strong>Search by exact words</strong> finds codes, units and IDs that meaning search can miss. Anthropic&#39;s post makes the same point: embeddings &quot;can miss crucial exact matches&quot;.</p>
+<p>So we run both and merge the two ranked lists with a simple formula, <strong>Reciprocal Rank Fusion</strong> (RRF): each result gets <code>1 / (60 + its rank)</code> in each list, and the two scores are added. A result that ranks well in both lists wins. The <a href="https://github.com/pgvector/pgvector#hybrid-search" target="_blank" rel="noopener noreferrer">pgvector README</a> suggests exactly this, based on the <a href="https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf" target="_blank" rel="noopener noreferrer">original RRF paper</a>.</p>
+<h2>Table-safe RAG checklist</h2>
+<ul>
+<li>Read the PDF with a layout-aware tool. Never separate a header from its rows.</li>
+<li>Small tables: one chunk with the title. Large tables: one chunk per row, repeating title, section, page and headers.</li>
+<li>Link each row to its full table.</li>
+<li>Combine meaning search and exact-word search.</li>
+<li>Build citations from stored data, never from the AI&#39;s text.</li>
+<li>Test with real questions about numbers inside tables.</li>
+</ul>
+<h2>For engineers</h2>
+<p>Code and details for each step. Open the ones you need.</p>
+<details class="post-deep">
+<summary>Step 1: parsing tables with Docling (code)</summary>
+
+<p><a href="https://github.com/docling-project/docling" target="_blank" rel="noopener noreferrer">Docling</a> is an open-source (MIT) document converter. Its <a href="https://arxiv.org/abs/2408.09869" target="_blank" rel="noopener noreferrer">technical report</a> describes a layout analysis model and TableFormer, a model that recovers table structure. The output keeps tables, reading order and section hierarchy.</p>
+<p><em>Simplified example, based on the Docling docs:</em></p>
+<pre class="shiki shiki-themes github-light github-dark" style="--shiki-light:#24292e;--shiki-dark:#e1e4e8;--shiki-light-bg:#fff;--shiki-dark-bg:#24292e" tabindex="0"><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">from</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> docling.datamodel.base_models </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> InputFormat</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">from</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> docling.datamodel.pipeline_options </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> PdfPipelineOptions, TableFormerMode</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">from</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> docling.document_converter </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> DocumentConverter, PdfFormatOption</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">opts </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> PdfPipelineOptions(</span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">do_table_structure</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">True</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">)</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">opts.table_structure_options.mode </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> TableFormerMode.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">ACCURATE</span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D">  # already the default</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">converter </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> DocumentConverter(</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    format_options</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">{InputFormat.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">PDF</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: PdfFormatOption(</span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">pipeline_options</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">opts)}</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">)</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">doc </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> converter.convert(</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"handbook.pdf"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">).document</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">for</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> table </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">in</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> doc.tables:</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">    df </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> table.export_to_dataframe(</span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">doc</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">doc)  </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D"># pandas DataFrame, headers become columns</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">    print</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">(table.self_ref, table.caption_text(doc), [p.page_no </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">for</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> p </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">in</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> table.prov])</span></span></code></pre><p>Each table gives you a DataFrame, a caption, and provenance (<code>prov</code>) with the page number and bounding box. If columns come out merged, the docs suggest <code>do_cell_matching = False</code>.</p>
+</details>
+
+<details class="post-deep">
+<summary>Step 2: chunk sizes, parent links and Docling's HybridChunker</summary>
+
+<p><strong>Small tables: one chunk.</strong> Keep the table as Markdown with its caption. This suits questions like &quot;compare all plans&quot;. The limit is the embedding model: all-MiniLM-L6-v2, for example, truncates input longer than 256 word pieces, so the later rows of a large table never reach the vector.</p>
+<p><strong>Large tables: one chunk per row</strong>, repeating the table title, the section and page, and the column header next to every value.</p>
+<p><strong>Link rows to the parent table.</strong> Every row stores a <code>parent_id</code>, so when a row matches, the model can also get the full table with its neighbouring rows and footnotes. This is the &quot;small chunks for search, larger parent for context&quot; idea behind LangChain&#39;s ParentDocumentRetriever.</p>
+<p>For prose, Docling&#39;s <a href="https://docling-project.github.io/docling/concepts/chunking/" target="_blank" rel="noopener noreferrer"><code>HybridChunker</code></a> splits by structure, then by token count, and <code>contextualize()</code> adds the headings to the text you embed. It also chunks tables, writing cells as &quot;row, column = value&quot; and repeating the header across chunks; <code>chunk.meta.doc_items</code> lets you spot those chunks and decide whether to keep them next to your row chunks.</p>
+</details>
+
+<details class="post-deep">
+<summary>Step 3: the chunks table in PostgreSQL</summary>
+
+<p>One <code>chunks</code> table holds prose, whole tables, and rows. Each record has an id, a <code>kind</code> (<code>text</code>, <code>table</code> or <code>table_row</code>), a <code>parent_id</code> from a row to its table, the section and pages, the <code>content</code> the model reads, a pgvector <code>embedding</code> with an HNSW index, and a generated <code>tsvector</code> column with a GIN index for full-text search.</p>
+</details>
+
+<details class="post-deep">
+<summary>Step 4: hybrid search with RRF in one SQL query</summary>
+
+<p>PostgreSQL&#39;s <code>ts_rank_cd</code> is not BM25 (the docs say its ranking functions <a href="https://www.postgresql.org/docs/current/textsearch-controls.html" target="_blank" rel="noopener noreferrer">do not use any global information</a>), but it fills the same keyword role. The query below adapts the <a href="https://github.com/pgvector/pgvector-python/blob/master/examples/hybrid_search/rrf.py" target="_blank" rel="noopener noreferrer">pgvector-python RRF example</a>; the paper used k = 60.</p>
+<p><em>Simplified example (psycopg named parameters, with pgvector-python&#39;s <code>register_vector</code>):</em></p>
+<details class="post-code"><summary>Show code <span>sql · 30 lines</span></summary><pre class="shiki shiki-themes github-light github-dark" style="--shiki-light:#24292e;--shiki-dark:#e1e4e8;--shiki-light-bg:#fff;--shiki-dark-bg:#24292e" tabindex="0"><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">WITH</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> query </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> (</span></span>
+<span class="line"><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D">    -- plainto_tsquery ANDs every word; OR them so a full question can still match</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    SELECT</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> replace</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">(plainto_tsquery(</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">'english'</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, %(question)s)::</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">text</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">' &#x26; '</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">' | '</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">)::tsquery </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> q</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">),</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">semantic </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> (</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    SELECT</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> id, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">RANK</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">() </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">OVER</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> (</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">ORDER BY</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> embedding </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">&#x3C;=></span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> %(qvec)s) </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> rnk</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    FROM</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> chunks</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    ORDER BY</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> embedding </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">&#x3C;=></span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> %(qvec)s</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    LIMIT</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> 40</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">),</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">keyword </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> (</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    SELECT</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> id, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">RANK</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">() </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">OVER</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> (</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">ORDER BY</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> ts_rank_cd(tsv, q) </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">DESC</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">) </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> rnk</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    FROM</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> chunks, query</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    WHERE</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> tsv @@ q</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    ORDER BY</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> ts_rank_cd(tsv, q) </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">DESC</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    LIMIT</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> 40</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">),</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">fused </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> (</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    SELECT</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> COALESCE</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">(</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">s</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">id</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">k</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">id</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">) </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> id,</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">           COALESCE</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">(</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">1</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">0</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> /</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> (</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">60</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> +</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> s</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">rnk</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">), </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">0</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">0</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">) </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">+</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> COALESCE</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">(</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">1</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">0</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> /</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> (</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">60</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> +</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> k</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">rnk</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">), </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">0</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">0</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">) </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> score</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    FROM</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> semantic s</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">    FULL OUTER JOIN</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> keyword k </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">ON</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> s</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">id</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> =</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> k</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">id</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">)</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">SELECT</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> c</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">id</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">c</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">kind</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">c</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">content</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">c</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">section</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">c</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">pages</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">f</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">score</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">       p</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">content</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> AS</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> parent_table               </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D">-- NULL unless the hit is a row</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">FROM</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> fused f</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">JOIN</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> chunks c </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">ON</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> c</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">id</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> =</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> f</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">id</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">LEFT JOIN</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> chunks p </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">ON</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> p</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">id</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> =</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> c</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">parent_id</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">ORDER BY</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> f</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">.</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">score</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> DESC</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">LIMIT</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> 8</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">;</span></span></code></pre></details><p>Two details matter here:</p>
+<ul>
+<li><strong>AND vs OR.</strong> <code>plainto_tsquery</code> and <code>websearch_to_tsquery</code> put an AND between words, so a full question often matches no chunk and your hybrid search quietly becomes vector-only. The <code>replace(... &#39; &amp; &#39;, &#39; | &#39;)</code> line turns it into an OR query, and <code>ts_rank_cd</code> still ranks chunks with more matching words higher.</li>
+<li><strong>Duplicates.</strong> A row and its parent table can both match. Group results by <code>COALESCE(parent_id, id)</code> so the same table is not sent to the model twice.</li>
+</ul>
+</details>
+
+<details class="post-deep">
+<summary>Step 5: citations and bounding boxes</summary>
+
+<p>Ask the model to reference chunk IDs, then turn those IDs into &quot;Section 4.1, page 12&quot; in your code.</p>
+<p>For visual citations, Docling&#39;s provenance also holds a bounding box, and table cells can have their own. Check <code>bbox.coord_origin</code> first: boxes can use a top-left or bottom-left origin, and <code>to_top_left_origin(page_height)</code> converts them for an image overlay.</p>
+</details>
+
+<h2>Sources</h2>
+<ul>
+<li><a href="https://github.com/docling-project/docling" target="_blank" rel="noopener noreferrer">Docling on GitHub</a></li>
+<li><a href="https://arxiv.org/abs/2408.09869" target="_blank" rel="noopener noreferrer">Docling Technical Report (arXiv:2408.09869)</a></li>
+<li><a href="https://docling-project.github.io/docling/concepts/docling_document/" target="_blank" rel="noopener noreferrer">Docling docs: DoclingDocument</a></li>
+<li><a href="https://docling-project.github.io/docling/concepts/chunking/" target="_blank" rel="noopener noreferrer">Docling docs: Chunking (HybridChunker, table header repetition)</a></li>
+<li><a href="https://docling-project.github.io/docling/usage/advanced_options/" target="_blank" rel="noopener noreferrer">Docling docs: Advanced options (table extraction)</a></li>
+<li><a href="https://github.com/docling-project/docling/blob/main/docs/examples/export_tables.py" target="_blank" rel="noopener noreferrer">Docling example: export_tables.py</a></li>
+<li><a href="https://github.com/docling-project/docling-core/blob/main/docling_core/transforms/chunker/hierarchical_chunker.py" target="_blank" rel="noopener noreferrer">docling-core: TripletTableSerializer</a></li>
+<li><a href="https://github.com/docling-project/docling-core/blob/main/docling_core/types/doc/common/reference.py" target="_blank" rel="noopener noreferrer">docling-core: ProvenanceItem</a>, <a href="https://github.com/docling-project/docling-core/blob/main/docling_core/types/doc/items/table/table_data.py" target="_blank" rel="noopener noreferrer">TableCell</a> and <a href="https://github.com/docling-project/docling-core/blob/main/docling_core/types/doc/base.py" target="_blank" rel="noopener noreferrer">BoundingBox</a></li>
+<li><a href="https://github.com/pgvector/pgvector" target="_blank" rel="noopener noreferrer">pgvector README</a></li>
+<li><a href="https://github.com/pgvector/pgvector-python/blob/master/examples/hybrid_search/rrf.py" target="_blank" rel="noopener noreferrer">pgvector-python: hybrid search with RRF</a></li>
+<li><a href="https://www.postgresql.org/docs/current/textsearch-tables.html" target="_blank" rel="noopener noreferrer">PostgreSQL docs: Tables and indexes for text search</a></li>
+<li><a href="https://www.postgresql.org/docs/current/textsearch-controls.html" target="_blank" rel="noopener noreferrer">PostgreSQL docs: Controlling text search</a></li>
+<li><a href="https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf" target="_blank" rel="noopener noreferrer">Cormack, Clarke, Büttcher (2009): Reciprocal Rank Fusion</a></li>
+<li><a href="https://www.anthropic.com/news/contextual-retrieval" target="_blank" rel="noopener noreferrer">Anthropic: Introducing Contextual Retrieval</a></li>
+<li><a href="https://reference.langchain.com/python/langchain-classic/retrievers/parent_document_retriever/ParentDocumentRetriever" target="_blank" rel="noopener noreferrer">LangChain reference: ParentDocumentRetriever</a></li>
+<li><a href="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2" target="_blank" rel="noopener noreferrer">sentence-transformers/all-MiniLM-L6-v2 model card</a></li>
+</ul>
+
+</article>
+
+<footer class="post-foot">
+  <a href="/#contact">Get in touch</a> · <a href="/">adeilm.github.io</a>
+</footer>
+</body>
+</html>

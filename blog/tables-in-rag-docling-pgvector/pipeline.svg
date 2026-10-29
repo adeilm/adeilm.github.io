@@ -1,0 +1,72 @@
+<svg class="dd-rag" viewBox="0 0 360 468" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dd-rag-title dd-rag-desc">
+  <title id="dd-rag-title">Table-safe RAG pipeline</title>
+  <desc id="dd-rag-desc">A long PDF is parsed by Docling for layout and table structure, split into text chunks and row chunks that carry the table title and column headers and link to their parent table, stored in PostgreSQL with pgvector and full-text search, retrieved with hybrid vector and keyword search fused by Reciprocal Rank Fusion, and turned into an answer with page and section citations.</desc>
+  <style>
+    svg.dd-rag { max-width: 432px; margin-inline: auto; }
+    .dd-rag .dd-mask { fill: var(--bg); }
+    .dd-rag .dd-node { fill: var(--surface); stroke: var(--dim); stroke-opacity: .45; stroke-width: 1; }
+    .dd-rag .dd-node--focal { fill: var(--accent); fill-opacity: .12; stroke: var(--accent); stroke-opacity: 1; stroke-width: 1.25; }
+    .dd-rag .dd-node--input { fill: var(--bg); stroke: var(--dim); stroke-opacity: .7; }
+    .dd-rag .dd-name { font: 600 14.5px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-rag .dd-sub { font: 400 12px 'Inter', system-ui, sans-serif; fill: var(--dim); }
+    .dd-rag .dd-num { font: 400 12px 'JetBrains Mono', ui-monospace, monospace; fill: var(--dim); }
+    .dd-rag .dd-glyph { fill: none; stroke: var(--dim); stroke-width: 1.1; stroke-linejoin: round; }
+    .dd-rag .dd-wire { fill: none; stroke: var(--dim); stroke-width: 1.25; }
+    .dd-rag .dd-head { fill: var(--dim); }
+  </style>
+  <defs>
+    <marker id="dd-rag-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon class="dd-head" points="0 0, 8 3, 0 6"/>
+    </marker>
+  </defs>
+
+  <!-- Connectors (behind nodes) -->
+  <line class="dd-wire" x1="192" y1="48" x2="192" y2="72" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="94" y1="124" x2="94" y2="156" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="264" y1="124" x2="264" y2="156" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="94" y1="224" x2="94" y2="256" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="264" y1="224" x2="264" y2="256" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="192" y1="308" x2="192" y2="332" marker-end="url(#dd-rag-arrow)"/>
+  <line class="dd-wire" x1="192" y1="384" x2="192" y2="408" marker-end="url(#dd-rag-arrow)"/>
+
+  <!-- Input -->
+  <rect class="dd-node dd-node--input" x="32" y="8" width="320" height="40" rx="6"/>
+  <text class="dd-name" x="48" y="33">Long PDF</text>
+  <path class="dd-glyph" d="M318,17 h11 l7,7 v15 h-18 z M329,17 v7 h7"/>
+
+  <!-- Step 1: parse -->
+  <text class="dd-num" x="14" y="94" text-anchor="middle">1</text>
+  <rect class="dd-node" x="32" y="72" width="320" height="52" rx="6"/>
+  <text class="dd-name" x="48" y="94">Docling</text>
+  <text class="dd-sub" x="48" y="112">layout + table structure</text>
+
+  <!-- Step 2: chunk -->
+  <text class="dd-num" x="14" y="178" text-anchor="middle">2</text>
+  <rect class="dd-node" x="32" y="156" width="124" height="68" rx="6"/>
+  <text class="dd-name" x="48" y="178">Text chunks</text>
+  <text class="dd-sub" x="48" y="196">prose + headings</text>
+  <rect class="dd-mask" x="176" y="156" width="176" height="68" rx="6"/>
+  <rect class="dd-node dd-node--focal" x="176" y="156" width="176" height="68" rx="6"/>
+  <text class="dd-name" x="192" y="178">Row chunks</text>
+  <text class="dd-sub" x="192" y="196">with title + headers</text>
+  <text class="dd-sub" x="192" y="212">linked to parent table</text>
+
+  <!-- Step 3: store -->
+  <text class="dd-num" x="14" y="278" text-anchor="middle">3</text>
+  <rect class="dd-node" x="32" y="256" width="320" height="52" rx="6"/>
+  <text class="dd-name" x="48" y="278">PostgreSQL</text>
+  <text class="dd-sub" x="48" y="296">pgvector + full-text</text>
+  <path class="dd-glyph" d="M318,275 v14 a9,3.5 0 0 0 18,0 v-14 M318,275 a9,3.5 0 0 0 18,0 a9,3.5 0 0 0 -18,0"/>
+
+  <!-- Step 4: retrieve -->
+  <text class="dd-num" x="14" y="354" text-anchor="middle">4</text>
+  <rect class="dd-node" x="32" y="332" width="320" height="52" rx="6"/>
+  <text class="dd-name" x="48" y="354">Hybrid search</text>
+  <text class="dd-sub" x="48" y="372">vector + keyword, fused with RRF</text>
+
+  <!-- Step 5: answer -->
+  <text class="dd-num" x="14" y="430" text-anchor="middle">5</text>
+  <rect class="dd-node" x="32" y="408" width="320" height="52" rx="6"/>
+  <text class="dd-name" x="48" y="430">Answer</text>
+  <text class="dd-sub" x="48" y="448">with page and section citations</text>
+</svg>

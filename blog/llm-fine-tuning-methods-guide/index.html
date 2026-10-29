@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Should you fine-tune your LLM? A plain guide to SFT, LoRA, DPO and GRPO · Dali Abid</title>
+<meta name="description" content="Eight ways to adapt an AI model, explained like teaching a new colleague: what each needs, when to use it, and when not to train at all." />
+<meta name="author" content="Dali Abid" />
+<meta property="og:title" content="Should you fine-tune your LLM? A plain guide to SFT, LoRA, DPO and GRPO" />
+<meta property="og:description" content="Eight ways to adapt an AI model, explained like teaching a new colleague: what each needs, when to use it, and when not to train at all." />
+<meta property="og:type" content="article" />
+<meta property="og:image" content="https://adeilm.github.io/blog/llm-fine-tuning-methods-guide/cover.webp" />
+<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/blog/post.css" />
+<script>
+  // same day/night choice as the portfolio (night by default)
+  try { if (localStorage.getItem('theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}
+</script>
+<script data-goatcounter="https://daliabid.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+</head>
+<body>
+<header class="post-top">
+  <a class="post-home" href="/#blog"><img src="/logo.svg" alt="" width="26" height="26" /> Dali <span>Abid</span></a>
+  <a class="post-back" href="/#blog">← All posts</a>
+</header>
+
+<article class="post">
+  <p class="post-meta">LLMs · Fine-tuning · 2026-10-29 · 6 min read</p>
+  <h1>Should you fine-tune your LLM? A plain guide to SFT, LoRA, DPO and GRPO</h1>
+  <img class="post-cover" src="cover.webp" alt="" />
+  <p>You have an AI model, like the one behind ChatGPT. It is smart, but it doesn&#39;t do exactly what you need. Maybe it doesn&#39;t know your company&#39;s documents. Maybe it answers in the wrong format. Should you train it, or just ask better?</p>
+<p>&quot;Fine-tune it&quot; is the usual answer, and it comes with a pile of acronyms: SFT, LoRA, QLoRA, RLHF, DPO, GRPO. Each one solves a different problem and needs different data. This post explains them in plain words first, then gives the details for engineers.</p>
+<p>I learned this while comparing these methods during a research internship this summer. There I wrote a decision guide to help engineering teams choose an approach, and built the first version of a RAG assistant that recommends one, with citations. Everything below comes from public papers and docs, listed at the end.</p>
+<div class="post-tldr">
+<p class="post-tldr__title">The post in 30 seconds</p>
+<dl class="post-brief">
+<dt>Question</dt><dd>My AI model doesn't do what I need. Should I train it?</dd>
+<dt>Answer</dt><dd>Often not. First try a better prompt, and let it look things up in your documents (RAG).</dd>
+<dt>Train when</dt><dd>You need to change how it behaves: a format, a tone, a narrow task, or a smaller model.</dd>
+<dt>Start with</dt><dd>LoRA, a cheap way to train. Add DPO or GRPO later if you need more.</dd>
+</dl>
+</div>
+
+<div class="post-terms">
+<p class="post-terms__title">Words you'll see</p>
+<dl>
+<div><dt>LLM</dt><dd>Large language model: the kind of AI behind ChatGPT.</dd></div>
+<div><dt>Weights</dt><dd>The billions of numbers inside a model. Training changes them.</dd></div>
+<div><dt>Fine-tuning</dt><dd>Training an existing model a bit more, on your own examples.</dd></div>
+<div><dt>RAG</dt><dd>Retrieval-augmented generation: the model looks up your documents before it answers.</dd></div>
+<div><dt>Eval set</dt><dd>A fixed list of test questions with good answers, to check if a change helped.</dd></div>
+</dl>
+</div>
+
+<h2>First: do you need to train at all?</h2>
+<p><figure class="post-figure"><img src="crossroads.webp" alt="The boy and a small golden helper at a fork in a desert path: one way leads to a tent full of books, the other to a training ground" loading="lazy" /><figcaption>Two different fixes: look things up, or practice a new habit.</figcaption></figure></p>
+<p>Most problems fall into one of two groups:</p>
+<div class="post-compare">
+<div class="post-compare__col">
+<p class="post-compare__label">Missing knowledge</p>
+<p class="post-compare__quote">It doesn't know your documents or recent facts.</p>
+<p>Give it the handbook: let it look things up.</p>
+<p class="post-compare__chips"><span>Fix: RAG</span></p>
+</div>
+<div class="post-compare__col post-compare__col--ai">
+<p class="post-compare__label">Wrong behavior</p>
+<p class="post-compare__quote">It knows enough, but the format, tone or task is wrong.</p>
+<p>Train the habit with examples.</p>
+<p class="post-compare__chips"><span>Fix: fine-tuning</span></p>
+</div>
+</div>
+
+<p>Research backs this up. <a href="https://arxiv.org/abs/2312.05934" target="_blank" rel="noopener noreferrer">Ovadia et al. (2023)</a> found that RAG consistently beat fine-tuning on raw documents at adding knowledge. Gekhman et al. (2024) found that models learn new facts slowly through fine-tuning, and then make up more answers.</p>
+<p>Either way, start with a good prompt and an eval set. Without them, you can&#39;t tell whether training helped.</p>
+<p>My short version: <strong>RAG changes what the model can look up. Fine-tuning changes how it behaves.</strong></p>
+<h2>Eight methods, as if the model were a new colleague</h2>
+<p>Imagine the model is a smart new colleague. Each method is a different way to teach them:</p>
+<div class="post-cards post-cards--two">
+<div class="post-card"><p class="post-card__q">SFT</p><p class="post-card__a">"Here are worked examples."</p><p>Supervised fine-tuning: pairs of a question and the ideal answer. The model copies the pattern.</p></div>
+<div class="post-card"><p class="post-card__q">LoRA</p><p class="post-card__a">"Add a small notebook, don't rewrite the brain."</p><p>Freeze the big model and train a tiny add-on. Much cheaper.</p></div>
+<div class="post-card"><p class="post-card__q">QLoRA</p><p class="post-card__a">"The same, on a smaller desk."</p><p>LoRA on a compressed model, so it fits on one GPU.</p></div>
+<div class="post-card"><p class="post-card__q">RLHF</p><p class="post-card__a">"Hire a coach who scores every answer."</p><p>People rank answers, a scoring model learns from them, then the model trains to get high scores.</p></div>
+<div class="post-card"><p class="post-card__q">DPO</p><p class="post-card__a">"This answer is better than that one."</p><p>Learns directly from pairs of better and worse answers. No coach needed.</p></div>
+<div class="post-card"><p class="post-card__q">GRPO</p><p class="post-card__a">"Here is a test with an answer key."</p><p>A program checks each answer, like tests for code. Better-than-average tries are rewarded.</p></div>
+<div class="post-card"><p class="post-card__q">Distillation</p><p class="post-card__a">"An expert trains a junior."</p><p>A big model's answers teach a small, fast model.</p></div>
+<div class="post-card"><p class="post-card__q">Merging</p><p class="post-card__a">"Combine two specialists."</p><p>Mix the weights of two fine-tuned versions of one model. No training at all.</p></div>
+</div>
+
+<p><figure class="post-figure"><img src="two-answers.webp" alt="A golden compass-star helper holds up two scrolls, one bright and one dull, and the boy points at the bright one" loading="lazy" /><figcaption>DPO in one picture: show two answers and point to the better one.</figcaption></figure></p>
+<h2>The trick that made training cheap: LoRA</h2>
+<p>A model&#39;s weights are huge tables of numbers. Full fine-tuning changes all of them, which needs a lot of GPU memory.</p>
+<p>LoRA freezes the big table (W) and trains two thin tables (B and A) beside it. Their product is added to W. Drag the figure to turn it:</p>
+<figure class="post-figure post-3d">
+<div class="post-3d__stage" role="img" aria-label="3D view of LoRA: a large frozen weight matrix W with d rows and k columns, plus the product of two thin trainable matrices, B with d rows and r columns and A with r rows and k columns, where r is much smaller than d and k.">
+<p class="post-3d__fallback">W (frozen, d × k) + B (d × r) × A (r × k), with r ≪ d, k. Only B and A are trained.</p>
+<span class="post-3d__label" data-label="w"><b>W</b> (frozen) <i>d × k</i></span>
+<span class="post-3d__op" data-label="plus">+</span>
+<span class="post-3d__label post-3d__label--gold" data-label="b"><b>B</b> <i>d × r</i></span>
+<span class="post-3d__op" data-label="times">×</span>
+<span class="post-3d__label post-3d__label--gold" data-label="a"><b>A</b> <i>r × k</i></span>
+<span class="post-3d__note" data-label="rank">r ≪ d, k</span>
+</div>
+<div class="post-3d__ranks" role="group" aria-label="LoRA rank r" hidden>
+<span>rank r</span>
+<button type="button" data-rank="1" aria-pressed="false">1</button>
+<button type="button" data-rank="2" aria-pressed="true">2</button>
+<button type="button" data-rank="4" aria-pressed="false">4</button>
+</div>
+<figcaption><span class="post-3d__hint">Drag to rotate. </span>W stays frozen; only the thin B and A are trained, and B × A is added to W (notation from <a href="https://arxiv.org/abs/2106.09685" target="_blank" rel="noopener noreferrer">Hu et al., 2021</a>). Not to scale.</figcaption>
+</figure>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+</script>
+<script type="module" src="lora-3d.js"></script>
+
+<p>Against full fine-tuning of GPT-3 175B, <a href="https://arxiv.org/abs/2106.09685" target="_blank" rel="noopener noreferrer">LoRA</a> cut the trained parameters by 10,000× and GPU memory by 3×. <a href="https://arxiv.org/abs/2305.14314" target="_blank" rel="noopener noreferrer">QLoRA</a> goes further: it compresses the frozen model to 4 bits, so fine-tuning a 65B model needs under 48 GB instead of over 780 GB.</p>
+<p>The catch is in the title of one study: <a href="https://arxiv.org/abs/2405.09673" target="_blank" rel="noopener noreferrer">&quot;LoRA Learns Less and Forgets Less&quot;</a>. It learns less than full fine-tuning, but it also damages less of what the model already knew.</p>
+<h2>Which one should you pick?</h2>
+<p>Ask these questions in order. The first &quot;yes&quot; tells you where to start.</p>
+<figure class="post-figure post-ladder-fig">
+<ol class="post-ladder">
+<li><span class="post-ladder__q">Missing facts or private documents?</span><span class="post-ladder__a">RAG</span></li>
+<li><span class="post-ladder__q">Does a good prompt with a few examples pass your eval?</span><span class="post-ladder__a">Ship the prompt</span></li>
+<li><span class="post-ladder__q">A few hundred to a few thousand good examples?</span><span class="post-ladder__a">SFT with LoRA / QLoRA</span></li>
+<li><span class="post-ladder__q">You can tell which of two answers is better?</span><span class="post-ladder__a">DPO</span></li>
+<li><span class="post-ladder__q">A program can check whether an answer is right?</span><span class="post-ladder__a">GRPO</span></li>
+<li><span class="post-ladder__q">Nuanced human preferences, labeling budget, RL experience?</span><span class="post-ladder__a">RLHF with PPO</span></li>
+<li><span class="post-ladder__q">A large model works but is too slow or costly?</span><span class="post-ladder__a">Distillation</span></li>
+<li><span class="post-ladder__q">Several fine-tunes of the same base model?</span><span class="post-ladder__a">Model merging</span></li>
+</ol>
+<figcaption>Ask in order. The first "yes" is where you start.</figcaption>
+</figure>
+
+<p>On one GPU with 24–48 GB of memory, use QLoRA. The steps also stack: a common path is SFT first, then DPO or GRPO.</p>
+<h2>My rule of thumb</h2>
+<p>Change the cheapest thing first: prompt and evaluate, retrieve for knowledge, and train only to change behavior.</p>
+<p>Build one fixed eval set on day one, and change one thing at a time. If you add RAG, LoRA and DPO in the same week, you won&#39;t know which one helped.</p>
+<h2>For engineers</h2>
+<p>Data needs, cost and risks for each method. Open the ones you need.</p>
+<details class="post-deep">
+<summary>Comparison table: data, compute, risks</summary>
+
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Data you need</th>
+<th>Compute (relative)</th>
+<th>Good for</th>
+<th>Main risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Prompting + RAG</td>
+<td>Documents, an eval set</td>
+<td>Inference only</td>
+<td>Knowledge, fast iteration</td>
+<td>Weak retrieval</td>
+</tr>
+<tr>
+<td>Full SFT</td>
+<td>Many good examples</td>
+<td>Very high</td>
+<td>Most learning</td>
+<td>Forgetting, cost</td>
+</tr>
+<tr>
+<td>LoRA</td>
+<td>Same as SFT</td>
+<td>Medium</td>
+<td>First training run</td>
+<td>Hyperparameter sensitivity</td>
+</tr>
+<tr>
+<td>QLoRA</td>
+<td>Same as SFT</td>
+<td>Low</td>
+<td>Single-GPU budgets</td>
+<td>Activation memory</td>
+</tr>
+<tr>
+<td>RLHF (RM + PPO)</td>
+<td>Demos, rankings, prompts</td>
+<td>Highest</td>
+<td>Broad alignment</td>
+<td>Instability, reward hacking</td>
+</tr>
+<tr>
+<td>DPO</td>
+<td>Chosen/rejected pairs</td>
+<td>Medium</td>
+<td>Style, tone, preferences</td>
+<td>Needs SFT first</td>
+</tr>
+<tr>
+<td>GRPO</td>
+<td>Prompts + automatic reward</td>
+<td>High (generation)</td>
+<td>Verifiable tasks</td>
+<td>Reward hacking, length bias</td>
+</tr>
+<tr>
+<td>Distillation</td>
+<td>Prompts + teacher outputs</td>
+<td>High once, cheap after</td>
+<td>Latency and cost</td>
+<td>Train/inference mismatch, licenses</td>
+</tr>
+<tr>
+<td>Merging</td>
+<td>None (plus eval set)</td>
+<td>Very low</td>
+<td>Combining fine-tunes</td>
+<td>Interference</td>
+</tr>
+</tbody></table>
+<p>The compute column is my rough ranking, not a benchmark.</p>
+</details>
+
+<details class="post-deep">
+<summary>SFT with full fine-tuning</summary>
+
+<p>Show the model input → ideal output pairs and update every weight. Quality beats volume: LIMA got strong results from 1,000 curated examples. Compute is very high (about 112 GB for a 7B model with mixed-precision Adam, before activations, per ZeRO). On code and math, it learned more than LoRA at common ranks, but forgot more outside the target domain (<a href="https://arxiv.org/abs/2405.09673" target="_blank" rel="noopener noreferrer">Biderman et al., 2024</a>).</p>
+<p>Save full fine-tuning for lots of data, several GPUs, and a LoRA run that has plateaued.</p>
+</details>
+
+<details class="post-deep">
+<summary>LoRA and QLoRA: a minimal setup (code)</summary>
+
+<p>LoRA adapters merge back into the model with no extra inference latency, which makes it the right first training run. QLoRA keeps the base model in 4-bit; long sequences still add activation memory.</p>
+<p>Minimal setup (PEFT docs); drop the 4-bit parts for plain LoRA:</p>
+<details class="post-code"><summary>Show code <span>python · 24 lines</span></summary><pre class="shiki shiki-themes github-light github-dark" style="--shiki-light:#24292e;--shiki-dark:#e1e4e8;--shiki-light-bg:#fff;--shiki-dark-bg:#24292e" tabindex="0"><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> torch</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">from</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> transformers </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> AutoModelForCausalLM, BitsAndBytesConfig</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">from</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> peft </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> LoraConfig, get_peft_model, prepare_model_for_kbit_training</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">bnb_config </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> BitsAndBytesConfig(</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    load_in_4bit</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">True</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    bnb_4bit_quant_type</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"nf4"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    bnb_4bit_use_double_quant</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">True</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    bnb_4bit_compute_dtype</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">torch.bfloat16,</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">)</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">model </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> AutoModelForCausalLM.from_pretrained(</span></span>
+<span class="line"><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">    "mistralai/Mistral-7B-v0.1"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">quantization_config</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">bnb_config</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">)</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">model </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> prepare_model_for_kbit_training(model)</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">lora_config </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> LoraConfig(</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    r</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">16</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    lora_alpha</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">32</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,                </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D"># alpha = 2 x rank</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    target_modules</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"all-linear"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,  </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D"># all linear layers, QLoRA-style</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    lora_dropout</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">0.05</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70">    task_type</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"CAUSAL_LM"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">)</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">model </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> get_peft_model(model, lora_config)</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">model.print_trainable_parameters()</span></span></code></pre></details></details>
+
+<details class="post-deep">
+<summary>RLHF: reward model + PPO</summary>
+
+<p>SFT on human demonstrations, then a reward model trained on human rankings, then PPO against that reward (<a href="https://arxiv.org/abs/2203.02155" target="_blank" rel="noopener noreferrer">Ouyang et al., 2022</a>). It needs paid labelers and runs four models (policy, reference, reward, value). It suits broad alignment: a 1.3B InstructGPT model was preferred over the 175B GPT-3. The risks are instability and reward over-optimization (Gao et al., 2022).</p>
+</details>
+
+<details class="post-deep">
+<summary>DPO</summary>
+
+<p>No reward model, no RL loop: <a href="https://arxiv.org/abs/2305.18290" target="_blank" rel="noopener noreferrer">DPO</a> learns from pairs of preferred and rejected answers with a simple classification-style loss, at close to SFT cost. Use it for tone, style, or what a summary should focus on. Run it on your SFT model, and watch <code>logps/chosen</code>: DPO can also lower the chosen answers&#39; probability (Pal et al., 2024).</p>
+</details>
+
+<details class="post-deep">
+<summary>GRPO</summary>
+
+<p>Reinforcement learning without a critic: the model samples a group of answers per prompt, a reward function scores them, and answers above the group average get reinforced (<a href="https://arxiv.org/abs/2402.03300" target="_blank" rel="noopener noreferrer">Shao et al., 2024</a>). Use it when a program can check correctness: math, code with tests, extraction into a fixed schema. The main risk is reward hacking, which is why <a href="https://arxiv.org/abs/2501.12948" target="_blank" rel="noopener noreferrer">DeepSeek-R1</a> avoided neural reward models for reasoning.</p>
+</details>
+
+<details class="post-deep">
+<summary>Distillation</summary>
+
+<p><figure class="post-figure"><img src="distill.webp" alt="A large wise golden compass-star spirit teaches a tiny one on a moonlit dune while the boy watches" loading="lazy" /><figcaption>A big model teaches a small one.</figcaption></figure></p>
+<p>A large teacher trains a smaller student, most simply through SFT on the teacher&#39;s answers: DeepSeek&#39;s R1-Distill models used about 800k DeepSeek-R1 samples. Use it when a large model works but is too slow or costly. A student trained on fixed outputs never practices on its own mistakes; check the teacher&#39;s license, too.</p>
+</details>
+
+<details class="post-deep">
+<summary>Model merging</summary>
+
+<p>Combine the weights of several fine-tunes of one base model, such as a task fine-tune and a style fine-tune, without training (task arithmetic, TIES-Merging, DARE). You only need an eval set, and mergekit runs on a CPU. The risk is interference, so evaluate every task you care about.</p>
+</details>
+
+<h2>Sources</h2>
+<ul>
+<li>Hu et al., 2021. <a href="https://arxiv.org/abs/2106.09685" target="_blank" rel="noopener noreferrer">LoRA: Low-Rank Adaptation of Large Language Models</a></li>
+<li>Dettmers et al., 2023. <a href="https://arxiv.org/abs/2305.14314" target="_blank" rel="noopener noreferrer">QLoRA: Efficient Finetuning of Quantized LLMs</a></li>
+<li>Ouyang et al., 2022. <a href="https://arxiv.org/abs/2203.02155" target="_blank" rel="noopener noreferrer">Training language models to follow instructions with human feedback</a></li>
+<li>Rafailov et al., 2023. <a href="https://arxiv.org/abs/2305.18290" target="_blank" rel="noopener noreferrer">Direct Preference Optimization: Your Language Model is Secretly a Reward Model</a></li>
+<li>Shao et al., 2024. <a href="https://arxiv.org/abs/2402.03300" target="_blank" rel="noopener noreferrer">DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models</a></li>
+<li>DeepSeek-AI, 2025. <a href="https://arxiv.org/abs/2501.12948" target="_blank" rel="noopener noreferrer">DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning</a></li>
+<li>Liu et al., 2025. <a href="https://arxiv.org/abs/2503.20783" target="_blank" rel="noopener noreferrer">Understanding R1-Zero-Like Training: A Critical Perspective</a></li>
+<li>Hinton et al., 2015. <a href="https://arxiv.org/abs/1503.02531" target="_blank" rel="noopener noreferrer">Distilling the Knowledge in a Neural Network</a></li>
+<li>Sanh et al., 2019. <a href="https://arxiv.org/abs/1910.01108" target="_blank" rel="noopener noreferrer">DistilBERT, a distilled version of BERT</a></li>
+<li>Agarwal et al., 2023. <a href="https://arxiv.org/abs/2306.13649" target="_blank" rel="noopener noreferrer">On-Policy Distillation of Language Models: Learning from Self-Generated Mistakes</a></li>
+<li>Ilharco et al., 2022. <a href="https://arxiv.org/abs/2212.04089" target="_blank" rel="noopener noreferrer">Editing Models with Task Arithmetic</a></li>
+<li>Yadav et al., 2023. <a href="https://arxiv.org/abs/2306.01708" target="_blank" rel="noopener noreferrer">TIES-Merging: Resolving Interference When Merging Models</a></li>
+<li>Yu et al., 2023. <a href="https://arxiv.org/abs/2311.03099" target="_blank" rel="noopener noreferrer">Language Models are Super Mario: Absorbing Abilities from Homologous Models as a Free Lunch</a> (DARE)</li>
+<li>Goddard et al., 2024. <a href="https://arxiv.org/abs/2403.13257" target="_blank" rel="noopener noreferrer">Arcee&#39;s MergeKit: A Toolkit for Merging Large Language Models</a>, and the <a href="https://github.com/arcee-ai/mergekit" target="_blank" rel="noopener noreferrer">mergekit repository</a></li>
+<li>Biderman et al., 2024. <a href="https://arxiv.org/abs/2405.09673" target="_blank" rel="noopener noreferrer">LoRA Learns Less and Forgets Less</a></li>
+<li>Zhou et al., 2023. <a href="https://arxiv.org/abs/2305.11206" target="_blank" rel="noopener noreferrer">LIMA: Less Is More for Alignment</a></li>
+<li>Rajbhandari et al., 2019. <a href="https://arxiv.org/abs/1910.02054" target="_blank" rel="noopener noreferrer">ZeRO: Memory Optimizations Toward Training Trillion Parameter Models</a></li>
+<li>Gao et al., 2022. <a href="https://arxiv.org/abs/2210.10760" target="_blank" rel="noopener noreferrer">Scaling Laws for Reward Model Overoptimization</a></li>
+<li>Xu et al., 2024. <a href="https://arxiv.org/abs/2404.10719" target="_blank" rel="noopener noreferrer">Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study</a></li>
+<li>Pal et al., 2024. <a href="https://arxiv.org/abs/2402.13228" target="_blank" rel="noopener noreferrer">Smaug: Fixing Failure Modes of Preference Optimisation with DPO-Positive</a></li>
+<li>Lewis et al., 2020. <a href="https://arxiv.org/abs/2005.11401" target="_blank" rel="noopener noreferrer">Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks</a></li>
+<li>Ovadia et al., 2023. <a href="https://arxiv.org/abs/2312.05934" target="_blank" rel="noopener noreferrer">Fine-Tuning or Retrieval? Comparing Knowledge Injection in LLMs</a></li>
+<li>Gekhman et al., 2024. <a href="https://arxiv.org/abs/2405.05904" target="_blank" rel="noopener noreferrer">Does Fine-Tuning LLMs on New Knowledge Encourage Hallucinations?</a></li>
+<li>Hugging Face docs: <a href="https://huggingface.co/docs/trl/dataset_formats" target="_blank" rel="noopener noreferrer">TRL dataset formats</a>, <a href="https://huggingface.co/docs/trl/dpo_trainer" target="_blank" rel="noopener noreferrer">TRL DPO Trainer</a>, <a href="https://huggingface.co/docs/trl/grpo_trainer" target="_blank" rel="noopener noreferrer">TRL GRPO Trainer</a>, <a href="https://huggingface.co/docs/trl/distillation_trainer" target="_blank" rel="noopener noreferrer">TRL Distillation Trainer</a>, <a href="https://huggingface.co/docs/peft/quicktour" target="_blank" rel="noopener noreferrer">PEFT quicktour</a>, <a href="https://huggingface.co/docs/peft/developer_guides/lora" target="_blank" rel="noopener noreferrer">PEFT LoRA guide</a>, <a href="https://huggingface.co/docs/peft/developer_guides/quantization" target="_blank" rel="noopener noreferrer">PEFT quantization guide</a></li>
+<li>OpenAI. <a href="https://developers.openai.com/api/docs/guides/model-optimization" target="_blank" rel="noopener noreferrer">Model optimization guide</a></li>
+</ul>
+
+</article>
+
+<footer class="post-foot">
+  <a href="/#contact">Get in touch</a> · <a href="/">adeilm.github.io</a>
+</footer>
+</body>
+</html>

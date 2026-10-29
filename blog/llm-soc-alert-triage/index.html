@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>A local AI that explains security alerts: 63% less time to understand them · Dali Abid</title>
+<meta name="description" content="We built an AI assistant that explains security alerts in plain words, on our own machine. How it works, and what a small test can't prove." />
+<meta name="author" content="Dali Abid" />
+<meta property="og:title" content="A local AI that explains security alerts: 63% less time to understand them" />
+<meta property="og:description" content="We built an AI assistant that explains security alerts in plain words, on our own machine. How it works, and what a small test can't prove." />
+<meta property="og:type" content="article" />
+<meta property="og:image" content="https://adeilm.github.io/blog/llm-soc-alert-triage/cover.webp" />
+<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/blog/post.css" />
+<script>
+  // same day/night choice as the portfolio (night by default)
+  try { if (localStorage.getItem('theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}
+</script>
+<script data-goatcounter="https://daliabid.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+</head>
+<body>
+<header class="post-top">
+  <a class="post-home" href="/#blog"><img src="/logo.svg" alt="" width="26" height="26" /> Dali <span>Abid</span></a>
+  <a class="post-back" href="/#blog">← All posts</a>
+</header>
+
+<article class="post">
+  <p class="post-meta">GenAI · Security · 2026-10-29 · 6 min read</p>
+  <h1>A local AI that explains security alerts: 63% less time to understand them</h1>
+  <img class="post-cover" src="cover.webp" alt="" />
+  <p>Every day, a company&#39;s security tools raise hundreds of alarms. &quot;Someone tried 50 passwords on a server.&quot; &quot;A program changed a system file.&quot; A person has to read each alarm and decide: is this a real attack, or a false alarm? It is slow and tiring work.</p>
+<p>For our end-of-year university project, my teammate Yessine Abdelmaksoud and I gave that person an AI assistant. The analyst clicks an alarm, and the assistant explains it in plain words, says how serious it looks, and suggests what to check next.</p>
+<div class="post-tldr">
+<p class="post-tldr__title">The project in 30 seconds</p>
+<dl class="post-brief">
+<dt>What</dt><dd>An AI assistant that explains security alerts to the person who handles them.</dd>
+<dt>Where</dt><dd>A small security lab of five virtual machines in our faculty's datacenter.</dd>
+<dt>How</dt><dd>A free AI model (Qwen3 14B) running on our own machine, so no data leaves the lab.</dd>
+<dt>Result</dt><dd>Time to understand an alert: 342 s → 127 s, in a small test (15 alerts, 2 students).</dd>
+<dt>Team</dt><dd>Two students: Yessine Abdelmaksoud and me.</dd>
+</dl>
+</div>
+
+<div class="post-terms">
+<p class="post-terms__title">Words you'll see</p>
+<dl>
+<div><dt>SOC</dt><dd>Security Operations Center: the team that watches a company's systems for attacks.</dd></div>
+<div><dt>Alert</dt><dd>An automatic warning: "this looks suspicious". Many alerts are false alarms.</dd></div>
+<div><dt>Wazuh, Suricata</dt><dd>Free tools that raise alerts. Wazuh watches computers. Suricata watches network traffic.</dd></div>
+<div><dt>LLM</dt><dd>Large language model: the kind of AI behind ChatGPT. Ours runs on our own machine.</dd></div>
+<div><dt>MITRE ATT&amp;CK</dt><dd>A public list of attacker techniques, each with an ID. T1110 means "guessing passwords".</dd></div>
+</dl>
+</div>
+
+<h2>The problem: too many alarms</h2>
+<p><figure class="post-figure"><img src="alarms.webp" alt="A tired analyst in a desert watchtower, surrounded by many glowing alarm lights" loading="lazy" /><figcaption>Hundreds of alarms a day, and a person must check each one.</figcaption></figure></p>
+<p>The tools in a SOC raise alerts all day, and someone has to check each one. When Oxford researchers interviewed SOC analysts, they <a href="https://www.usenix.org/conference/usenixsecurity22/presentation/alahmadi" target="_blank" rel="noopener noreferrer">confirmed high false-positive rates that require manual validation</a>, which &quot;can cause alarm burnout&quot;.</p>
+<p>Reading one alert is slow, too. The analyst sees a rule number, IP addresses and codes. To understand the story, they search for related events by hand.</p>
+<p>We did not try to catch new attacks. We tried to make each alert <strong>faster to understand</strong>.</p>
+<h2>Our idea: an assistant that reads first</h2>
+<p>We added one helper between the alarm and the person. It never replaces the analyst: it reads first, then explains.</p>
+<div class="post-flow" role="list" aria-label="How an alert reaches the analyst">
+<div class="post-flow__step" role="listitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><b>Attack</b><span>Someone tries to break in. In our lab, we did it on purpose.</span></div>
+<div class="post-flow__arrow" aria-hidden="true">triggers</div>
+<div class="post-flow__step" role="listitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z M10 21h4"/></svg><b>Alarm tools</b><span>Wazuh and Suricata notice it and raise an alert.</span></div>
+<div class="post-flow__arrow" aria-hidden="true">on click</div>
+<div class="post-flow__step post-flow__step--ai" role="listitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.6 5 2 6.4 7 7-5 .6-6.4 2-7 7-.6-5-2-6.4-7-7 5-.6 6.4-2 7-7z M19 15c.3 2 1 2.7 3 3-2 .3-2.7 1-3 3-.3-2-1-2.7-3-3 2-.3 2.7-1 3-3z"/></svg><b>AI assistant</b><span>Gathers related events and explains the alert.</span></div>
+<div class="post-flow__arrow" aria-hidden="true">explains</div>
+<div class="post-flow__step" role="listitem"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg><b>Analyst</b><span>Reads the explanation and decides what to do.</span></div>
+</div>
+
+<p>For each alert, the assistant answers three questions:</p>
+<div class="post-cards">
+<div class="post-card"><p class="post-card__q">What happened?</p><p>A short summary, how serious it looks, and the attack stage from MITRE ATT&amp;CK.</p></div>
+<div class="post-card"><p class="post-card__q">How do I check?</p><p>One to three ready-made searches for <span class="term" tabindex="0">Kibana<span class="term__tip">The screen where analysts search and read alerts. KQL is its search language.</span></span>.</p></div>
+<div class="post-card"><p class="post-card__q">What should I do?</p><p>One action from a fixed list of ten, with reasons and a confidence score.</p></div>
+</div>
+
+<p><figure class="post-figure"><img src="assistant.webp" alt="A small glowing compass-star helper hands the young analyst one alarm and a calm explanation" loading="lazy" /><figcaption>The assistant explains. The person decides.</figcaption></figure></p>
+<h2>Follow one alert: a password-guessing attack</h2>
+<p><figure class="post-figure"><img src="attack.webp" alt="A shadowy figure tries a huge ring of keys on a desert fortress door while a watchtower bell rings" loading="lazy" /><figcaption>Our test attack: a program tries many passwords to get into a server.</figcaption></figure></p>
+<p>Here is one of our test attacks, step by step. Values are illustrative, and our real outputs were in French, so I&#39;ve translated.</p>
+<ol>
+<li><strong>The attack.</strong> A script tries many passwords for <code>root</code>, the administrator account, on our test server <code>vm-endp1</code>. This is called a <strong>brute-force</strong> attack.</li>
+<li><strong>The alarms.</strong> Suricata sees the attack in the network traffic. 35 seconds later, Wazuh sees the failed logins on the server and raises alert 5763.</li>
+<li><strong>The click.</strong> The analyst opens the alert. Our service first gathers related events: same IP address, same machine or same user, in a short time window. One alert becomes a small story with a timeline.</li>
+<li><strong>The answer.</strong> The AI reads that story and explains it:</li>
+</ol>
+<div class="post-compare">
+<div class="post-compare__col">
+<p class="post-compare__label">Without AI: the raw alert</p>
+<pre class="post-compare__raw">rule.id       5763
+rule.mitre    T1110
+agent.name    vm-endp1
+data.srcip    10.0.0.66
+data.dstuser  root</pre>
+<p>The analyst must look up the rule, the IP and the technique, then search for related events.</p>
+</div>
+<div class="post-compare__col post-compare__col--ai">
+<p class="post-compare__label">With our assistant</p>
+<p class="post-compare__quote">"Repeated failed SSH logins as root on vm-endp1 from 10.0.0.66, also flagged by Suricata. Looks like automated password guessing. No successful login in the context: check for an accepted login from this IP."</p>
+<p class="post-compare__chips"><span>Severity: high</span><span>Stage: credential access</span><span>T1110.001: password guessing</span></p>
+</div>
+</div>
+
+<p>The AI added what the raw alert didn&#39;t say: the exact technique, whether the attack seems to have worked, and what to check next.</p>
+<details class="post-deep">
+<summary>See the AI's exact answer (JSON)</summary>
+
+<pre class="shiki shiki-themes github-light github-dark" style="--shiki-light:#24292e;--shiki-dark:#e1e4e8;--shiki-light-bg:#fff;--shiki-dark-bg:#24292e" tabindex="0"><code><span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">{</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">  "summary"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"Repeated failed SSH logins as root on vm-endp1 from 10.0.0.66, also flagged by Suricata. Looks like automated password guessing. No successful login in the context: check for an accepted login from this IP."</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">  "severity_assessment"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"high"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">  "key_iocs"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: [</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"10.0.0.66"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"vm-endp1"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"root"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">],</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">  "attack_phase"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"credential_access"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">  "mitre_techniques"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: [</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"T1110"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">, </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"T1110.001"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">]</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">}</span></span></code></pre></details>
+
+<h2>Inside the lab</h2>
+<p>Here is the full setup. Five Ubuntu virtual machines ran in our faculty&#39;s datacenter (on CloudStack/KVM):</p>
+<ul>
+<li><strong>Endpoint</strong>: the test server we attacked. A Wazuh agent on it reports what happens.</li>
+<li><strong>Wazuh manager</strong>: collects those reports and raises alerts about the computer.</li>
+<li><strong>Suricata</strong>: watches the network traffic and raises alerts about it.</li>
+<li><strong>Elastic Stack</strong>: stores all alerts (Elasticsearch) and shows them (Kibana).</li>
+<li><strong>AI machine</strong>: runs the model (Qwen3 14B in Ollama), our service (FastAPI) and a small web page for the analyst.</li>
+</ul>
+<p>Scroll slowly: an alert travels through the diagram, from detection to the analyst.</p>
+<p><figure class="post-figure post-svg"><svg class="dd-soc" viewBox="0 0 360 756" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dd-soc-title dd-soc-desc">
+  <title id="dd-soc-title">AI alert enrichment pipeline</title>
+  <desc id="dd-soc-desc">Wazuh and Suricata alerts flow through Filebeat into Elasticsearch as usual; when an analyst clicks Explain, a FastAPI service reads the alert and related events, asks Qwen3 14B running locally in Ollama, checks the JSON answer against a schema with one retry, writes it to a separate enrichment index, and the analyst UI shows it.</desc>
+  <style>
+    svg.dd-soc { max-width: 432px; margin-inline: auto; }
+    .dd-soc .dd-zone { fill: none; stroke: var(--dim); stroke-opacity: .38; stroke-width: 1; }
+    .dd-soc .dd-zone--ai { stroke-opacity: .6; stroke-dasharray: 5 4; }
+    .dd-soc .dd-zl { font: 600 11.5px 'Space Grotesk', system-ui, sans-serif; letter-spacing: .1em; fill: var(--dim); }
+    .dd-soc .dd-zl--ai { fill: var(--link); }
+    .dd-soc .dd-mask { fill: var(--bg); }
+    .dd-soc .dd-node { fill: var(--surface); stroke: var(--dim); stroke-opacity: .45; stroke-width: 1; }
+    .dd-soc .dd-node--focal { fill: var(--accent); fill-opacity: .12; stroke: var(--accent); stroke-opacity: 1; stroke-width: 1.25; }
+    .dd-soc .dd-node--input { fill: var(--bg); stroke: var(--dim); stroke-opacity: .7; }
+    .dd-soc .dd-name { font: 600 14.5px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-soc .dd-act { font: 500 13px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-soc .dd-sub { font: 400 12px 'Inter', system-ui, sans-serif; fill: var(--dim); }
+    .dd-soc .dd-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; }
+    .dd-soc .dd-glyph { fill: none; stroke: var(--dim); stroke-width: 1.1; }
+    .dd-soc .dd-wire { fill: none; stroke: var(--dim); stroke-width: 1.25; }
+    .dd-soc .dd-head { fill: var(--dim); }
+    .dd-soc .dd-el { font: 600 11.5px 'Space Grotesk', system-ui, sans-serif; letter-spacing: .08em; fill: var(--dim); }
+  </style>
+  <defs>
+    <marker id="dd-soc-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon class="dd-head" points="0 0, 8 3, 0 6"/>
+    </marker>
+  </defs>
+
+  <!-- Zones (drawn first) -->
+  <rect class="dd-zone" x="8" y="8" width="344" height="244" rx="8"/>
+  <text class="dd-zl" x="24" y="31">DETECTION · UNCHANGED</text>
+  <rect class="dd-zone dd-zone--ai" x="8" y="288" width="344" height="460" rx="8"/>
+  <text class="dd-zl dd-zl--ai" x="24" y="311">AI ENRICHMENT · ON DEMAND</text>
+
+  <!-- Connectors (behind nodes); data-step = the step each one leads into -->
+  <g class="dd-edge" data-step="2">
+    <line class="dd-wire" x1="180" y1="96" x2="180" y2="120" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="3">
+    <line class="dd-wire" x1="180" y1="160" x2="180" y2="184" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="5">
+    <line class="dd-wire" x1="288" y1="236" x2="288" y2="380" marker-end="url(#dd-soc-arrow)"/>
+    <rect class="dd-mask" x="196" y="262" width="84" height="16" rx="2"/>
+    <text class="dd-el" x="280" y="274" text-anchor="end">READ ONLY</text>
+  </g>
+  <g class="dd-edge" data-step="5">
+    <line class="dd-wire" x1="130" y1="356" x2="130" y2="380" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="6">
+    <line class="dd-wire" x1="180" y1="432" x2="180" y2="456" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="7">
+    <line class="dd-wire" x1="180" y1="508" x2="180" y2="532" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="8">
+    <line class="dd-wire" x1="180" y1="584" x2="180" y2="616" marker-end="url(#dd-soc-arrow)"/>
+    <rect class="dd-mask" x="188" y="592" width="56" height="16" rx="2"/>
+    <text class="dd-el" x="190" y="604">WRITES</text>
+  </g>
+  <g class="dd-edge" data-step="9">
+    <line class="dd-wire" x1="180" y1="668" x2="180" y2="692" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+
+  <!-- Steps -->
+  <g class="dd-step" data-step="1">
+    <rect class="dd-node" x="24" y="44" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="66">Wazuh + Suricata alerts</text>
+    <text class="dd-sub" x="40" y="84">host + network detection</text>
+  </g>
+  <g class="dd-step" data-step="2">
+    <rect class="dd-node" x="24" y="120" width="312" height="40" rx="6"/>
+    <text class="dd-name" x="40" y="145">Filebeat</text>
+  </g>
+  <g class="dd-step" data-step="3">
+    <rect class="dd-node" x="24" y="184" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="206">Elasticsearch</text>
+    <text class="dd-sub" x="40" y="224">detection indices</text>
+    <path class="dd-glyph" d="M300,203 v14 a9,3.5 0 0 0 18,0 v-14 M300,203 a9,3.5 0 0 0 18,0 a9,3.5 0 0 0 -18,0"/>
+  </g>
+  <g class="dd-step" data-step="4">
+    <rect class="dd-node dd-node--input" x="24" y="324" width="212" height="32" rx="16"/>
+    <text class="dd-act" x="130" y="345" text-anchor="middle">Analyst clicks “Explain”</text>
+  </g>
+  <g class="dd-step" data-step="5">
+    <rect class="dd-node" x="24" y="380" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="402">FastAPI</text>
+    <text class="dd-sub" x="40" y="420">alert + related events</text>
+  </g>
+  <g class="dd-step" data-step="6">
+    <rect class="dd-mask" x="24" y="456" width="312" height="52" rx="6"/>
+    <rect class="dd-node dd-node--focal" x="24" y="456" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="478">Qwen3 14B via Ollama</text>
+    <text class="dd-sub" x="40" y="496">local only · <tspan class="dd-mono">127.0.0.1:11434</tspan></text>
+  </g>
+  <g class="dd-step" data-step="7">
+    <rect class="dd-node" x="24" y="532" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="554">JSON schema check</text>
+    <text class="dd-sub" x="40" y="572">one retry if it fails</text>
+  </g>
+  <g class="dd-step" data-step="8">
+    <rect class="dd-node" x="24" y="616" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="638">Separate enrichment index</text>
+    <text class="dd-sub" x="40" y="656">never the detection indices</text>
+    <path class="dd-glyph" d="M300,635 v14 a9,3.5 0 0 0 18,0 v-14 M300,635 a9,3.5 0 0 0 18,0 a9,3.5 0 0 0 -18,0"/>
+  </g>
+  <g class="dd-step" data-step="9">
+    <rect class="dd-node" x="24" y="692" width="312" height="40" rx="6"/>
+    <text class="dd-name" x="40" y="717">Analyst UI</text>
+  </g>
+</svg>
+<figcaption>Top: detection works as usual. Bottom: the AI part only reads alerts and writes to its own index.</figcaption></figure></p>
+<p>Three rules kept the AI part safe:</p>
+<ol>
+<li><strong>It runs only when asked.</strong> It works when the analyst clicks, not on every alert.</li>
+<li><strong>It writes in its own place.</strong> Its answers go to a separate <span class="term" tabindex="0">index<span class="term__tip">A storage space in Elasticsearch, like a separate table in a database.</span></span>, never into the real alerts.</li>
+<li><strong>It cannot act.</strong> It cannot block anything or change a rule. If the AI is down, the SOC works as before.</li>
+</ol>
+<h2>Did it help?</h2>
+<p>We ran a small, controlled test. Two student analysts handled 15 alerts twice: once as the raw alert in Kibana, once in our tool. We stopped the timer when they could say what was happening and what they would do.</p>
+<div class="post-kpis" role="group" aria-label="Mean time to understand an alert">
+<div class="post-kpi"><span class="post-kpi__value">342 s</span><span class="post-kpi__label">Raw alert in Kibana</span></div>
+<div class="post-kpi"><span class="post-kpi__value">127 s</span><span class="post-kpi__label">With the AI assistant</span></div>
+<div class="post-kpi"><span class="post-kpi__value">↓ 63%</span><span class="post-kpi__label">Mean time to understand an alert</span></div>
+</div>
+<p class="post-kpis__note">15 alerts · 2 student analysts · controlled test</p>
+
+<p>That is a good sign, not proof:</p>
+<ul>
+<li><strong>The test was tiny</strong>, and the analysts were students. Experienced analysts may gain less.</li>
+<li><strong>We chose the alerts</strong>, from attacks we ran ourselves. Real queues are full of false alarms.</li>
+<li><strong>We measured speed, not correctness.</strong> An AI can be confident and wrong. NIST calls this <a href="https://doi.org/10.6028/NIST.AI.600-1" target="_blank" rel="noopener noreferrer">confabulation</a> and warns that people tend to trust automation too much.</li>
+</ul>
+<p>Larger studies of Microsoft&#39;s Security Copilot point the same way, in <a href="https://www.benedelman.org/randomized-controlled-trial-for-microsoft-security-copilot/" target="_blank" rel="noopener noreferrer">randomized trials</a> and in <a href="https://arxiv.org/abs/2411.03116" target="_blank" rel="noopener noreferrer">live operations</a>. I compare the direction, not the numbers.</p>
+<h2>What I learned</h2>
+<p>The AI call was the easy part. Most of the work, and most of the value, was around it: collecting context, forcing a strict answer format, and making sure the AI can&#39;t act without a person.</p>
+<p>Next, I would run a bigger, blind test that checks whether decisions were right, attack the inputs on purpose (see &quot;log text&quot; below), and add a &quot;useful / not useful&quot; button to collect feedback.</p>
+<h2>For engineers</h2>
+<p>The parts below are for people who build these systems. Open the ones you need.</p>
+<details class="post-deep">
+<summary>Forcing a valid answer: JSON schema + validation</summary>
+
+<p>Our first version used Ollama&#39;s <code>format: &quot;json&quot;</code>, and every response failed validation: the model returned <code>{}</code>, valid JSON but empty. Passing the JSON schema itself as <code>format</code> fixed that.</p>
+<p>But constrained decoding can skip schema keywords it doesn&#39;t support (<a href="https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md" target="_blank" rel="noopener noreferrer">silently, in llama.cpp&#39;s case</a>). So Ollama gets only the structure, and jsonschema checks the rest, like text lengths and the ATT&amp;CK ID pattern:</p>
+<pre class="shiki shiki-themes github-light github-dark" style="--shiki-light:#24292e;--shiki-dark:#e1e4e8;--shiki-light-bg:#fff;--shiki-dark-bg:#24292e" tabindex="0"><code><span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">payload </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> {</span></span>
+<span class="line"><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">    "model"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"qwen3:14b"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">    "prompt"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: prompt,                 </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D"># instructions + schema + alert JSON</span></span>
+<span class="line"><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">    "format"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: structural_schema,      </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D"># constrains generation</span></span>
+<span class="line"><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">    "think"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">False</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">    "options"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: {</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"temperature"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">: </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">0.2</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">},</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">}</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">result </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> json.loads(ollama_reply[</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF">"response"</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">])</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">errors </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> [e.message </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">for</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> e </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">in</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> validator.iter_errors(result)]  </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D"># full schema</span></span></code></pre><p>We retry once. If that fails too, the result is saved with <code>validated: false</code>, so the analyst sees that the AI failed.</p>
+</details>
+
+<details class="post-deep">
+<summary>Closed lists instead of open questions</summary>
+
+<p>The attack phase comes from a fixed list, and the remediation is one of <strong>ten fixed action IDs</strong>, such as <code>block_source_ip</code>. The model picks; it never writes commands, and nothing runs automatically, not even the KQL queries.</p>
+<p>The prompt also asks for a time filter on each query, but code doesn&#39;t check that yet. Closed lists turn &quot;is this answer good?&quot; into &quot;is this answer allowed?&quot;, which code can check.</p>
+</details>
+
+<details class="post-deep">
+<summary>Treating log text as hostile (prompt injection)</summary>
+
+<p>Attacker-written text, like the fake User-Agent in one of our scenarios, lands in the alert and then in the prompt. This is <a href="https://arxiv.org/abs/2302.12173" target="_blank" rel="noopener noreferrer">indirect prompt injection</a>, which <a href="https://genai.owasp.org/llmrisk/llm01-prompt-injection/" target="_blank" rel="noopener noreferrer">OWASP ranks first (LLM01:2025)</a> among LLM risks.</p>
+<p>So alert data sits in its own JSON block that the model must never take instructions from, and indicators of compromise come only from structured fields. With closed lists and no tools, an injection can at worst pick a wrong option. We didn&#39;t red-team this, and a line in a prompt is not a security boundary.</p>
+</details>
+
+<details class="post-deep">
+<summary>Why the model runs locally</summary>
+
+<p>Alerts are full of usernames, hostnames and internal IPs, so nothing goes to a third-party API. The open-weights Qwen3 14B runs in Ollama on 127.0.0.1, reachable only by the FastAPI service on the same VM. The cost is speed: on a CPU-only VM, you notice the wait.</p>
+</details>
+
+<details class="post-deep">
+<summary>How we tested, and the ATT&amp;CK caveat</summary>
+
+<p>We automated five end-to-end attack scenarios: SSH brute force, a port scan, a change to <code>/etc/passwd</code>, an ICMP flood and a suspicious User-Agent. Each script runs the attack, waits for detection and checks that all three answers pass validation.</p>
+<p>In the timed test, we alternated which version each analyst saw first.</p>
+<p>ATT&amp;CK mappings are suggestions. A port scan could be T1046 (Discovery) or T1595 (Reconnaissance), depending on whether the attacker is already inside. And <a href="https://arxiv.org/abs/2412.10978" target="_blank" rel="noopener noreferrer">traditional ML models beat ChatGPT, Claude and Gemini</a> at labeling Snort rules with ATT&amp;CK techniques. Next, I would check IDs against MITRE&#39;s STIX data, not just their format.</p>
+</details>
+
+<h2>Sources</h2>
+<ul>
+<li>Alahmadi, Axon, Martinovic. <a href="https://www.usenix.org/conference/usenixsecurity22/presentation/alahmadi" target="_blank" rel="noopener noreferrer">99% False Positives: A Qualitative Study of SOC Analysts&#39; Perspectives on Security Alarms</a>. USENIX Security 2022.</li>
+<li>MITRE. <a href="https://attack.mitre.org/" target="_blank" rel="noopener noreferrer">ATT&amp;CK</a>; techniques <a href="https://attack.mitre.org/techniques/T1110/001/" target="_blank" rel="noopener noreferrer">T1110.001</a>, <a href="https://attack.mitre.org/techniques/T1046/" target="_blank" rel="noopener noreferrer">T1046</a>, <a href="https://attack.mitre.org/techniques/T1595/" target="_blank" rel="noopener noreferrer">T1595</a>; <a href="https://github.com/mitre-attack/attack-stix-data" target="_blank" rel="noopener noreferrer">ATT&amp;CK STIX data</a>.</li>
+<li>Wazuh. <a href="https://github.com/wazuh/wazuh/blob/v4.9.0/ruleset/rules/0095-sshd_rules.xml" target="_blank" rel="noopener noreferrer">sshd ruleset, rule 5763</a>.</li>
+<li>Ollama. <a href="https://ollama.com/blog/structured-outputs" target="_blank" rel="noopener noreferrer">Structured outputs (blog, Dec 2024)</a>; <a href="https://docs.ollama.com/capabilities/structured-outputs" target="_blank" rel="noopener noreferrer">Structured outputs docs</a>; <a href="https://docs.ollama.com/capabilities/thinking" target="_blank" rel="noopener noreferrer">Thinking docs</a>; <a href="https://docs.ollama.com/faq" target="_blank" rel="noopener noreferrer">FAQ</a>.</li>
+<li>llama.cpp. <a href="https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md" target="_blank" rel="noopener noreferrer">Grammars README: JSON Schema to GBNF</a>.</li>
+<li><a href="https://python-jsonschema.readthedocs.io/en/stable/" target="_blank" rel="noopener noreferrer">python-jsonschema documentation</a>.</li>
+<li>Qwen Team. <a href="https://qwenlm.github.io/blog/qwen3/" target="_blank" rel="noopener noreferrer">Qwen3: Think Deeper, Act Faster</a>.</li>
+<li>Greshake et al. <a href="https://arxiv.org/abs/2302.12173" target="_blank" rel="noopener noreferrer">Not what you&#39;ve signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection</a>. 2023.</li>
+<li>OWASP GenAI Security Project. <a href="https://genai.owasp.org/llmrisk/llm01-prompt-injection/" target="_blank" rel="noopener noreferrer">LLM01:2025 Prompt Injection</a>.</li>
+<li>NIST. <a href="https://doi.org/10.6028/NIST.AI.600-1" target="_blank" rel="noopener noreferrer">AI 600-1: Generative AI Profile</a>. July 2024.</li>
+<li>Daniel et al. <a href="https://arxiv.org/abs/2412.10978" target="_blank" rel="noopener noreferrer">Labeling NIDS Rules with MITRE ATT&amp;CK Techniques: Machine Learning vs. Large Language Models</a>. 2024.</li>
+<li>Bono, Peng, Rodriguez, Ho, Edelman. <a href="https://www.benedelman.org/randomized-controlled-trial-for-microsoft-security-copilot/" target="_blank" rel="noopener noreferrer">Randomized Controlled Trials for Microsoft Copilot for Security</a>. 2023–2024.</li>
+<li>Bono, Grana, Xu. <a href="https://arxiv.org/abs/2411.03116" target="_blank" rel="noopener noreferrer">Generative AI and Security Operations Center Productivity: Evidence from Live Operations</a>. 2024.</li>
+</ul>
+
+</article>
+<script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/MotionPathPlugin.min.js"></script>
+<script defer src="/blog/scroll-steps.js"></script>
+<footer class="post-foot">
+  <a href="/#contact">Get in touch</a> · <a href="/">adeilm.github.io</a>
+</footer>
+</body>
+</html>

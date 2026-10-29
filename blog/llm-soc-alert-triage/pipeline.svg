@@ -1,0 +1,111 @@
+<svg class="dd-soc" viewBox="0 0 360 756" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dd-soc-title dd-soc-desc">
+  <title id="dd-soc-title">AI alert enrichment pipeline</title>
+  <desc id="dd-soc-desc">Wazuh and Suricata alerts flow through Filebeat into Elasticsearch as usual; when an analyst clicks Explain, a FastAPI service reads the alert and related events, asks Qwen3 14B running locally in Ollama, checks the JSON answer against a schema with one retry, writes it to a separate enrichment index, and the analyst UI shows it.</desc>
+  <style>
+    svg.dd-soc { max-width: 432px; margin-inline: auto; }
+    .dd-soc .dd-zone { fill: none; stroke: var(--dim); stroke-opacity: .38; stroke-width: 1; }
+    .dd-soc .dd-zone--ai { stroke-opacity: .6; stroke-dasharray: 5 4; }
+    .dd-soc .dd-zl { font: 600 11.5px 'Space Grotesk', system-ui, sans-serif; letter-spacing: .1em; fill: var(--dim); }
+    .dd-soc .dd-zl--ai { fill: var(--link); }
+    .dd-soc .dd-mask { fill: var(--bg); }
+    .dd-soc .dd-node { fill: var(--surface); stroke: var(--dim); stroke-opacity: .45; stroke-width: 1; }
+    .dd-soc .dd-node--focal { fill: var(--accent); fill-opacity: .12; stroke: var(--accent); stroke-opacity: 1; stroke-width: 1.25; }
+    .dd-soc .dd-node--input { fill: var(--bg); stroke: var(--dim); stroke-opacity: .7; }
+    .dd-soc .dd-name { font: 600 14.5px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-soc .dd-act { font: 500 13px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-soc .dd-sub { font: 400 12px 'Inter', system-ui, sans-serif; fill: var(--dim); }
+    .dd-soc .dd-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; }
+    .dd-soc .dd-glyph { fill: none; stroke: var(--dim); stroke-width: 1.1; }
+    .dd-soc .dd-wire { fill: none; stroke: var(--dim); stroke-width: 1.25; }
+    .dd-soc .dd-head { fill: var(--dim); }
+    .dd-soc .dd-el { font: 600 11.5px 'Space Grotesk', system-ui, sans-serif; letter-spacing: .08em; fill: var(--dim); }
+  </style>
+  <defs>
+    <marker id="dd-soc-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon class="dd-head" points="0 0, 8 3, 0 6"/>
+    </marker>
+  </defs>
+
+  <!-- Zones (drawn first) -->
+  <rect class="dd-zone" x="8" y="8" width="344" height="244" rx="8"/>
+  <text class="dd-zl" x="24" y="31">DETECTION · UNCHANGED</text>
+  <rect class="dd-zone dd-zone--ai" x="8" y="288" width="344" height="460" rx="8"/>
+  <text class="dd-zl dd-zl--ai" x="24" y="311">AI ENRICHMENT · ON DEMAND</text>
+
+  <!-- Connectors (behind nodes); data-step = the step each one leads into -->
+  <g class="dd-edge" data-step="2">
+    <line class="dd-wire" x1="180" y1="96" x2="180" y2="120" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="3">
+    <line class="dd-wire" x1="180" y1="160" x2="180" y2="184" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="5">
+    <line class="dd-wire" x1="288" y1="236" x2="288" y2="380" marker-end="url(#dd-soc-arrow)"/>
+    <rect class="dd-mask" x="196" y="262" width="84" height="16" rx="2"/>
+    <text class="dd-el" x="280" y="274" text-anchor="end">READ ONLY</text>
+  </g>
+  <g class="dd-edge" data-step="5">
+    <line class="dd-wire" x1="130" y1="356" x2="130" y2="380" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="6">
+    <line class="dd-wire" x1="180" y1="432" x2="180" y2="456" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="7">
+    <line class="dd-wire" x1="180" y1="508" x2="180" y2="532" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+  <g class="dd-edge" data-step="8">
+    <line class="dd-wire" x1="180" y1="584" x2="180" y2="616" marker-end="url(#dd-soc-arrow)"/>
+    <rect class="dd-mask" x="188" y="592" width="56" height="16" rx="2"/>
+    <text class="dd-el" x="190" y="604">WRITES</text>
+  </g>
+  <g class="dd-edge" data-step="9">
+    <line class="dd-wire" x1="180" y1="668" x2="180" y2="692" marker-end="url(#dd-soc-arrow)"/>
+  </g>
+
+  <!-- Steps -->
+  <g class="dd-step" data-step="1">
+    <rect class="dd-node" x="24" y="44" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="66">Wazuh + Suricata alerts</text>
+    <text class="dd-sub" x="40" y="84">host + network detection</text>
+  </g>
+  <g class="dd-step" data-step="2">
+    <rect class="dd-node" x="24" y="120" width="312" height="40" rx="6"/>
+    <text class="dd-name" x="40" y="145">Filebeat</text>
+  </g>
+  <g class="dd-step" data-step="3">
+    <rect class="dd-node" x="24" y="184" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="206">Elasticsearch</text>
+    <text class="dd-sub" x="40" y="224">detection indices</text>
+    <path class="dd-glyph" d="M300,203 v14 a9,3.5 0 0 0 18,0 v-14 M300,203 a9,3.5 0 0 0 18,0 a9,3.5 0 0 0 -18,0"/>
+  </g>
+  <g class="dd-step" data-step="4">
+    <rect class="dd-node dd-node--input" x="24" y="324" width="212" height="32" rx="16"/>
+    <text class="dd-act" x="130" y="345" text-anchor="middle">Analyst clicks “Explain”</text>
+  </g>
+  <g class="dd-step" data-step="5">
+    <rect class="dd-node" x="24" y="380" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="402">FastAPI</text>
+    <text class="dd-sub" x="40" y="420">alert + related events</text>
+  </g>
+  <g class="dd-step" data-step="6">
+    <rect class="dd-mask" x="24" y="456" width="312" height="52" rx="6"/>
+    <rect class="dd-node dd-node--focal" x="24" y="456" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="478">Qwen3 14B via Ollama</text>
+    <text class="dd-sub" x="40" y="496">local only · <tspan class="dd-mono">127.0.0.1:11434</tspan></text>
+  </g>
+  <g class="dd-step" data-step="7">
+    <rect class="dd-node" x="24" y="532" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="554">JSON schema check</text>
+    <text class="dd-sub" x="40" y="572">one retry if it fails</text>
+  </g>
+  <g class="dd-step" data-step="8">
+    <rect class="dd-node" x="24" y="616" width="312" height="52" rx="6"/>
+    <text class="dd-name" x="40" y="638">Separate enrichment index</text>
+    <text class="dd-sub" x="40" y="656">never the detection indices</text>
+    <path class="dd-glyph" d="M300,635 v14 a9,3.5 0 0 0 18,0 v-14 M300,635 a9,3.5 0 0 0 18,0 a9,3.5 0 0 0 -18,0"/>
+  </g>
+  <g class="dd-step" data-step="9">
+    <rect class="dd-node" x="24" y="692" width="312" height="40" rx="6"/>
+    <text class="dd-name" x="40" y="717">Analyst UI</text>
+  </g>
+</svg>

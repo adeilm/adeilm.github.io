@@ -1,0 +1,85 @@
+<svg class="dd-cut" viewBox="0 0 360 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dd-cut-title dd-cut-desc">
+  <title id="dd-cut-title">Fixed-size chunks vs. row chunks</title>
+  <desc id="dd-cut-desc">The Plan limits table cut by fixed-size chunking: chunk 41 holds the title, the column headers, the Free row and half of the Team row, while chunk 42 holds the rest of the Team row, the Business row with 500,000 API calls and the next section. With row chunks, each of the Free, Team and Business rows is its own chunk that repeats the table title, section, page and column headers.</desc>
+  <style>
+    svg.dd-cut { max-width: 432px; margin-inline: auto; }
+    .dd-cut .dd-eb { font: 600 11.5px 'Space Grotesk', system-ui, sans-serif; letter-spacing: .1em; fill: var(--dim); }
+    .dd-cut .dd-c41, .dd-cut .dd-c42 { fill: var(--dim); stroke: var(--dim); stroke-opacity: .35; stroke-width: 1; }
+    .dd-cut .dd-c41 { fill-opacity: .16; }
+    .dd-cut .dd-c42 { fill-opacity: .05; }
+    .dd-cut .dd-cutline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+    .dd-cut .dd-grid { fill: none; stroke: var(--dim); stroke-opacity: .35; stroke-width: 1; }
+    .dd-cut .dd-card { fill: var(--surface); stroke: var(--dim); stroke-opacity: .45; stroke-width: 1; }
+    .dd-cut .dd-th { font: 600 12px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-cut .dd-td { font: 400 12px 'Inter', system-ui, sans-serif; fill: var(--text); }
+    .dd-cut .dd-note { font: 400 12px 'Inter', system-ui, sans-serif; fill: var(--dim); }
+    .dd-cut .dd-tag { font: 600 11.5px 'Space Grotesk', system-ui, sans-serif; letter-spacing: .08em; fill: var(--dim); }
+    .dd-cut .dd-hit { fill: none; stroke: var(--accent); stroke-width: 1.25; }
+    .dd-cut .dd-hit-t { font: 600 12px 'Inter', system-ui, sans-serif; fill: var(--link); }
+  </style>
+
+  <!-- columns: Plan 12-80 | Storage 80-144 | API calls / month 144-264 | Support 264-348 -->
+
+  <!-- BEFORE: one table, two fixed-size chunks -->
+  <text class="dd-eb" x="12" y="16">BEFORE · FIXED-SIZE CHUNKS</text>
+
+  <path class="dd-c41" d="M12,28 H348 V108 H144 V136 H12 Z"/>
+  <path class="dd-c42" d="M144,108 H348 V188 H12 V136 H144 Z"/>
+
+  <rect class="dd-grid" x="12" y="52" width="336" height="112"/>
+  <path class="dd-grid" d="M12,80 H348 M12,108 H348 M12,136 H348 M80,52 V164 M144,52 V164 M264,52 V164"/>
+
+  <text class="dd-th" x="20" y="44">Table 2: Plan limits</text>
+  <text class="dd-tag" x="340" y="44" text-anchor="end">CHUNK 41</text>
+
+  <text class="dd-th" x="20" y="70">Plan</text>
+  <text class="dd-th" x="88" y="70">Storage</text>
+  <text class="dd-th" x="152" y="70">API calls / month</text>
+  <text class="dd-th" x="272" y="70">Support</text>
+
+  <text class="dd-td" x="20" y="98">Free</text>
+  <text class="dd-td" x="88" y="98">5 GB</text>
+  <text class="dd-td" x="152" y="98">1,000</text>
+  <text class="dd-td" x="272" y="98">Community</text>
+
+  <text class="dd-td" x="20" y="126">Team</text>
+  <text class="dd-td" x="88" y="126">100 GB</text>
+  <text class="dd-td" x="152" y="126">50,000</text>
+  <text class="dd-td" x="272" y="126">Email</text>
+
+  <text class="dd-td" x="20" y="154">Business</text>
+  <text class="dd-td" x="88" y="154">1 TB</text>
+  <rect class="dd-hit" x="148" y="140" width="112" height="20" rx="3"/>
+  <text class="dd-hit-t" x="152" y="154">500,000</text>
+  <text class="dd-td" x="272" y="154">Priority</text>
+
+  <text class="dd-note" x="20" y="180">4.2 Rate limiting …</text>
+  <text class="dd-tag" x="340" y="180" text-anchor="end">CHUNK 42</text>
+
+  <!-- the chunk boundary, drawn last so it reads on top of the grid -->
+  <path class="dd-cutline" d="M12,136 H144 V108 H348"/>
+
+  <!-- AFTER: one chunk per row, each carrying title, section, page and headers -->
+  <text class="dd-eb" x="12" y="220">AFTER · ROW CHUNKS</text>
+
+  <rect class="dd-card" x="12" y="232" width="336" height="76" rx="6"/>
+  <text x="20" y="249"><tspan class="dd-th">Table 2: Plan limits</tspan><tspan class="dd-note"> | 4.1 Usage limits (p. 12)</tspan></text>
+  <path class="dd-grid" d="M12,256 H348 M12,282 H348 M80,256 V308 M144,256 V308 M264,256 V308"/>
+  <text class="dd-th" x="20" y="273">Plan</text><text class="dd-th" x="88" y="273">Storage</text><text class="dd-th" x="152" y="273">API calls / month</text><text class="dd-th" x="272" y="273">Support</text>
+  <text class="dd-td" x="20" y="299">Free</text><text class="dd-td" x="88" y="299">5 GB</text><text class="dd-td" x="152" y="299">1,000</text><text class="dd-td" x="272" y="299">Community</text>
+
+  <rect class="dd-card" x="12" y="316" width="336" height="76" rx="6"/>
+  <text x="20" y="333"><tspan class="dd-th">Table 2: Plan limits</tspan><tspan class="dd-note"> | 4.1 Usage limits (p. 12)</tspan></text>
+  <path class="dd-grid" d="M12,340 H348 M12,366 H348 M80,340 V392 M144,340 V392 M264,340 V392"/>
+  <text class="dd-th" x="20" y="357">Plan</text><text class="dd-th" x="88" y="357">Storage</text><text class="dd-th" x="152" y="357">API calls / month</text><text class="dd-th" x="272" y="357">Support</text>
+  <text class="dd-td" x="20" y="383">Team</text><text class="dd-td" x="88" y="383">100 GB</text><text class="dd-td" x="152" y="383">50,000</text><text class="dd-td" x="272" y="383">Email</text>
+
+  <rect class="dd-card" x="12" y="400" width="336" height="76" rx="6"/>
+  <text x="20" y="417"><tspan class="dd-th">Table 2: Plan limits</tspan><tspan class="dd-note"> | 4.1 Usage limits (p. 12)</tspan></text>
+  <path class="dd-grid" d="M12,424 H348 M12,450 H348 M80,424 V476 M144,424 V476 M264,424 V476"/>
+  <text class="dd-th" x="20" y="441">Plan</text><text class="dd-th" x="88" y="441">Storage</text><text class="dd-th" x="152" y="441">API calls / month</text><text class="dd-th" x="272" y="441">Support</text>
+  <text class="dd-td" x="20" y="467">Business</text><text class="dd-td" x="88" y="467">1 TB</text>
+  <rect class="dd-hit" x="148" y="453" width="112" height="20" rx="3"/>
+  <text class="dd-hit-t" x="152" y="467">500,000</text>
+  <text class="dd-td" x="272" y="467">Priority</text>
+</svg>
