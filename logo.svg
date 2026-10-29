@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <title>Dali Abid: compass star</title>
+  <circle cx="50" cy="52" r="42" fill="none" stroke="#c9a227" stroke-width="3" opacity="0.85"/>
+  <!-- diagonal points -->
+  <g fill="#b8901f">
+    <polygon points="50,52 67,35 56,52"/><polygon points="50,52 67,69 52,58"/>
+    <polygon points="50,52 33,69 44,52"/><polygon points="50,52 33,35 48,46"/>
+  </g>
+  <!-- main points, north is the long one -->
+  <g fill="#e0b84a">
+    <polygon points="50,4 56,46 50,52 44,46"/>
+    <polygon points="50,52 56,58 50,84 44,58"/>
+    <polygon points="50,52 56,46 80,52 56,58"/>
+    <polygon points="50,52 44,58 20,52 44,46"/>
+  </g>
+  <circle cx="50" cy="52" r="3.5" fill="#fdf5e6"/>
+</svg>
